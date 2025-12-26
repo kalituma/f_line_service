@@ -1,0 +1,17 @@
+2025-12-26 03:23:17,510 - __main__ - INFO - WildfireVideoService 초기화 중...
+2025-12-26 03:23:26,664 - server.backend.db.database - INFO - Shared database initialized at /home/airs_khw/mount/d_drive/__develope/temp/f_line_service/server/data/wildfire.json
+2025-12-26 03:24:10,737 - __main__ - INFO - WildfireVideoService 초기화 중...
+2025-12-26 03:25:18,801 - __main__ - INFO - WildfireVideoService 초기화 중...
+2025-12-26 03:25:22,101 - server.backend.db.database - INFO - Shared database initialized at /home/airs_khw/mount/d_drive/__develope/temp/f_line_service/data/tinydb/wildfire.json
+2025-12-26 03:25:22,102 - server.backend.db.table.video_table - INFO - WildfireVideoTable initialized
+2025-12-26 03:25:22,102 - server.backend.service.video_service - INFO - WildfireVideoService initialized
+2025-12-26 03:25:32,481 - __main__ - INFO - Import 시작: ../config/video_config.1.json
+2025-12-26 03:25:32,482 - server.backend.service.video_service - INFO - Successfully loaded config file: ../config/video_config.1.json
+2025-12-26 03:25:48,409 - server.backend.service.video_service - INFO - Config validation passed
+2025-12-26 03:25:48,409 - server.backend.service.video_service - INFO - Starting import for frfr_info_id: 123456, total videos: 2
+2025-12-26 03:26:20,456 - server.backend.db.table.video_table - INFO - Inserted wildfire_video record: 123456/FPA630_20230101_ANDONG_1.mp4
+2025-12-26 03:26:35,341 - server.backend.service.video_service - INFO - [1/2] Imported video: FPA630_20230101_ANDONG_1.mp4 (doc_id: 1)
+2025-12-26 03:26:35,615 - server.backend.db.table.video_table - INFO - Inserted wildfire_video record: 123456/FPA630_20230101_ANDONG_2.mp4
+2025-12-26 03:26:35,615 - server.backend.service.video_service - INFO - [2/2] Imported video: FPA630_20230101_ANDONG_2.mp4 (doc_id: 2)
+2025-12-26 03:26:35,615 - server.backend.service.video_service - INFO - Import completed - Total: 2, Imported: 2, Failed: 0
+2025-12-26 03:26:59,754 - __main__ - INFO - ✅ Import 완료 (성공)
