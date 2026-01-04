@@ -1,0 +1,7 @@
+.idea
+data
+config
+__pycache__
+*.mp4
+*.pyc
+*.log
