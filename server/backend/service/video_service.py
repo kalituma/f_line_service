@@ -2,13 +2,14 @@ import json
 import logging
 import os
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 from pydantic import BaseModel
 
 from server.backend.db.database import get_shared_database, SharedDatabase
 from server.backend.db.table.video_table import WildfireVideoTable
+from server.utils.config_util import validate_config, load_config_file
 
 logger = logging.getLogger(__name__)
-
 
 class WildfireVideo(BaseModel):
     """비디오 응답 모델"""
@@ -16,14 +17,7 @@ class WildfireVideo(BaseModel):
     video_name: str
     video_type: str
     video_path: str
-
-
-class VideoConfigSchema(BaseModel):
-    """비디오 설정 파일 스키마"""
-    frfr_info_id: str
-    analysis_id: str
-    video_info: List[Dict[str, str]]
-
+    add_time: str
 
 class WildfireVideoService:
     """비디오 설정 파일을 읽어서 DB에 저장하는 서비스"""
@@ -43,70 +37,77 @@ class WildfireVideoService:
         """
         return os.path.basename(video_path)
     
-    def load_config_file(self, config_file_path: str) -> Optional[Dict[str, Any]]:
+    @staticmethod
+    def _get_video_creation_time(video_path: str) -> Optional[str]:
         """
-        JSON 설정 파일을 읽습니다.
+        비디오 파일의 생성/수정 시간을 ISO format으로 반환합니다.
         
         Args:
-            config_file_path: 설정 파일 경로
+            video_path: 비디오 파일 경로
             
         Returns:
-            파싱된 설정 데이터 또는 None
+            ISO format 시간 문자열 또는 None
         """
         try:
-            if not os.path.exists(config_file_path):
-                logger.error(f"Config file not found: {config_file_path}")
+            if not os.path.exists(video_path):
+                logger.warning(f"Cannot get creation time - file not found: {video_path}")
                 return None
             
-            with open(config_file_path, 'r', encoding='utf-8') as f:
-                config_data = json.load(f)
-            
-            logger.info(f"Successfully loaded config file: {config_file_path}")
-            return config_data
+            # 파일의 수정 시간(mtime) 가져오기
+            mtime = os.path.getmtime(video_path)
+            creation_time = datetime.fromtimestamp(mtime).isoformat()
+            logger.debug(f"Got video creation time: {video_path} -> {creation_time}")
+            return creation_time
         
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON file: {e}")
-            return None
         except Exception as e:
-            logger.error(f"Error reading config file: {e}")
+            logger.error(f"Failed to get creation time for {video_path}: {str(e)}")
             return None
     
-    def validate_config(self, config_data: Dict[str, Any]) -> bool:
-        """
-        설정 데이터의 필수 필드를 검증합니다.
-        
-        Args:
-            config_data: 설정 데이터
-            
-        Returns:
-            검증 성공 여부
-        """
-        required_fields = ["frfr_info_id", "analysis_id", "video_info"]
-        
-        for field in required_fields:
-            if field not in config_data:
-                logger.error(f"Missing required field: {field}")
-                return False
-        
-        if not isinstance(config_data["video_info"], list):
-            logger.error("video_info must be a list")
-            return False
-        
-        if len(config_data["video_info"]) == 0:
-            logger.warning("video_info list is empty")
-            return False
-        
-        for idx, video_item in enumerate(config_data["video_info"]):
-            if "video_type" not in video_item or "video_path" not in video_item:
-                logger.error(
-                    f"video_info[{idx}] missing required fields "
-                    f"(video_type, video_path)"
+    def insert_from_video_config(self, config_data: Dict[str, Any]) -> None:
+        frfr_info_id = config_data["frfr_info_id"]
+        video_info_list = config_data["video_info"]
+        total_len = len(video_info_list)
+
+        logger.info(
+            f"Starting import for frfr_info_id: {frfr_info_id}, "
+            f"total videos: {total_len}"
+        )
+
+        for idx, video_item in enumerate(video_info_list):
+            try:
+                video_type = video_item["video_type"]
+                video_path = video_item["video_path"]
+                video_name = self._extract_video_name(video_path)
+
+                # 비디오 경로 존재 여부 확인 (선택사항)
+                if not os.path.exists(video_path):
+                    logger.warning(
+                        f"Video file not found: {video_path} "
+                        f"(but continuing with import)"
+                    )
+
+                # DB에 저장
+                add_time = self._get_video_creation_time(video_path)
+                doc_id = self.wildfire_video_table.insert(
+                    frfr_info_id=frfr_info_id,
+                    video_name=video_name,
+                    video_type=video_type,
+                    video_path=video_path,
+                    add_time=add_time
                 )
-                return False
-        
-        logger.info("Config validation passed")
-        return True
-    
+
+                logger.info(
+                    f"[{idx + 1}/{total_len}] Imported video: "
+                    f"{video_name} (doc_id: {doc_id})"
+                )
+            except Exception as e:
+                error_msg = (
+                    f"Failed to import video[{idx}] "
+                    f"({video_item.get('video_path', 'unknown')}): {str(e)}"
+                )
+                logger.error(error_msg)
+
+
     def import_from_config_file(self, config_file_path: str) -> Dict[str, Any]:
         """
         JSON 설정 파일에서 비디오 정보를 읽어 DB에 저장합니다.
@@ -131,22 +132,7 @@ class WildfireVideoService:
             "failed": 0,
             "errors": []
         }
-        
-        # 1. 설정 파일 로드
-        config_data = self.load_config_file(config_file_path)
-        if config_data is None:
-            result["errors"].append(f"Failed to load config file: {config_file_path}")
-            return result
-        
-        # 2. 설정 검증
-        if not self.validate_config(config_data):
-            result["errors"].append("Config validation failed")
-            return result
-        
-        frfr_info_id = config_data["frfr_info_id"]
-        video_info_list = config_data["video_info"]
-        result["total"] = len(video_info_list)
-        
+
         logger.info(
             f"Starting import for frfr_info_id: {frfr_info_id}, "
             f"total videos: {result['total']}"
@@ -167,11 +153,13 @@ class WildfireVideoService:
                     )
                 
                 # DB에 저장
+                add_time = self._get_video_creation_time(video_path)
                 doc_id = self.wildfire_video_table.insert(
                     frfr_info_id=frfr_info_id,
                     video_name=video_name,
                     video_type=video_type,
-                    video_path=video_path
+                    video_path=video_path,
+                    add_time=add_time
                 )
                 
                 logger.info(

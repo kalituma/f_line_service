@@ -7,30 +7,31 @@ from server.backend.db.database import get_shared_database, SharedDatabase
 logger = logging.getLogger(__name__)
 
 
-class AnalysisTable:
-    """Analysis 테이블 관리 (복합키: analysis_id + frfr_info_id)"""
+class AnalysisStatusTable:
+    """AnalysisStatus 테이블 관리 (복합키: analysis_id + frfr_info_id)"""
 
     def __init__(self, db: SharedDatabase = None):
         if db is None:
             db = get_shared_database()
         self.db = db
         self.table = db.get_table("analysis_status")
-        logger.info("AnalysisTable initialized")
+        logger.info("AnalysisStatusTable initialized")
 
     def insert(
         self,
         analysis_id: str,
         frfr_info_id: str,
-        video_updates: List[Dict[str, str]],
+        video_name: str,
+        analysis_status: str,
     ) -> str:
         """
-        분석 정보를 저장합니다.
+        분석 상태 정보를 저장합니다.
 
         Args:
-            analysis_id: 분석 ID (Primary Key)
-            frfr_info_id: 산불 정보 ID (Foreign Key)
-            video_updates: 비디오 업데이트 리스트
-                [{"video_name": str, "analysis_status": str}, ...]
+            analysis_id: 분석 ID
+            frfr_info_id: 산불 정보 ID
+            video_name: 비디오 이름
+            analysis_status: 분석 상태
 
         Returns:
             저장된 레코드 ID
@@ -38,7 +39,8 @@ class AnalysisTable:
         data = {
             "analysis_id": analysis_id,
             "frfr_info_id": frfr_info_id,
-            "video_updates": video_updates,
+            "video_name": video_name,
+            "analysis_status": analysis_status,
         }
         doc_id = self.table.insert(data)
         logger.info(
@@ -116,7 +118,8 @@ class AnalysisTable:
         self,
         analysis_id: str,
         frfr_info_id: str,
-        video_updates: Optional[List[Dict[str, str]]] = None,
+        video_name: str,
+        analysis_status: str,
     ) -> bool:
         """
         분석 정보를 업데이트합니다.
@@ -124,7 +127,8 @@ class AnalysisTable:
         Args:
             analysis_id: 분석 ID
             frfr_info_id: 산불 정보 ID
-            video_updates: 업데이트할 비디오 업데이트 리스트
+            video_name: 비디오 이름
+            analysis_status: 분석 상태
 
         Returns:
             업데이트 성공 여부
@@ -132,8 +136,10 @@ class AnalysisTable:
         analysis = Query()
         update_data = {}
 
-        if video_updates:
-            update_data["video_updates"] = video_updates
+        if video_name:
+            update_data["video_name"] = video_name
+        if analysis_status:
+            update_data["analysis_status"] = analysis_status
 
         if not update_data:
             logger.warning("No data to update")
@@ -234,84 +240,7 @@ class AnalysisTable:
             logger.warning(
                 f"No analysis records to delete for {frfr_info_id}"
             )
-            return False
-
-    def add_video_update(
-        self,
-        analysis_id: str,
-        frfr_info_id: str,
-        video_name: str,
-        analysis_status: str,
-    ) -> bool:
-        """
-        분석 레코드에 비디오 업데이트를 추가합니다.
-
-        Args:
-            analysis_id: 분석 ID
-            frfr_info_id: 산불 정보 ID
-            video_name: 비디오 이름
-            analysis_status: 분석 상태
-
-        Returns:
-            추가 성공 여부
-        """
-        analysis_record = self.get(analysis_id, frfr_info_id)
-        if not analysis_record:
-            logger.warning(
-                f"Analysis record not found: {analysis_id}/{frfr_info_id}"
-            )
-            return False
-
-        video_update = {
-            "video_name": video_name,
-            "analysis_status": analysis_status,
-        }
-        analysis_record["video_updates"].append(video_update)
-        return self.update(
-            analysis_id,
-            frfr_info_id,
-            video_updates=analysis_record["video_updates"],
-        )
-
-    def remove_video_update(
-        self, analysis_id: str, frfr_info_id: str, video_name: str
-    ) -> bool:
-        """
-        분석 레코드에서 비디오 업데이트를 제거합니다.
-
-        Args:
-            analysis_id: 분석 ID
-            frfr_info_id: 산불 정보 ID
-            video_name: 제거할 비디오 이름
-
-        Returns:
-            제거 성공 여부
-        """
-        analysis_record = self.get(analysis_id, frfr_info_id)
-        if not analysis_record:
-            logger.warning(
-                f"Analysis record not found: {analysis_id}/{frfr_info_id}"
-            )
-            return False
-
-        original_count = len(analysis_record["video_updates"])
-        analysis_record["video_updates"] = [
-            v
-            for v in analysis_record["video_updates"]
-            if v.get("video_name") != video_name
-        ]
-
-        if len(analysis_record["video_updates"]) < original_count:
-            return self.update(
-                analysis_id,
-                frfr_info_id,
-                video_updates=analysis_record["video_updates"],
-            )
-        else:
-            logger.warning(
-                f"Video update not found: {video_name}"
-            )
-            return False
+            return False    
 
     def get_all(self) -> List[Dict[str, Any]]:
         """

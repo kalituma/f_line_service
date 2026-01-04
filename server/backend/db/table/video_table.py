@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from tinydb import Query
 from typing import Optional, List, Dict, Any
 
@@ -13,6 +14,7 @@ class WildfireVideoTable:
         "video_name": str,
         "video_type": str,
         "video_path": str,
+        "add_time": str,  # ISO format datetime string
     }
     """
 
@@ -29,6 +31,7 @@ class WildfireVideoTable:
         video_name: str,
         video_type: str,
         video_path: str,
+        add_time: Optional[str] = None,
     ) -> str:
         """
         산불 비디오 정보를 저장합니다.
@@ -38,6 +41,7 @@ class WildfireVideoTable:
             video_name: 비디오 이름 (복합키의 일부)
             video_type: 비디오 타입 (예: FPA601, FPA630)
             video_path: 비디오 경로
+            add_time: 비디오 생성 시간 (ISO format, 미지정시 현재 시간)
 
         Returns:
             저장된 레코드 ID
@@ -47,6 +51,7 @@ class WildfireVideoTable:
             "video_name": video_name,
             "video_type": video_type,
             "video_path": video_path,
+            "add_time": add_time or datetime.now().isoformat(),
         }
         doc_id = self.table.insert(data)
         logger.info(
@@ -107,6 +112,7 @@ class WildfireVideoTable:
         video_name: str,
         video_type: Optional[str] = None,
         video_path: Optional[str] = None,
+        add_time: Optional[str] = None,
     ) -> bool:
         """
         비디오 정보를 업데이트합니다.
@@ -116,6 +122,7 @@ class WildfireVideoTable:
             video_name: 비디오 이름
             video_type: 업데이트할 비디오 타입
             video_path: 업데이트할 비디오 경로
+            add_time: 업데이트할 비디오 생성 시간 (ISO format)
 
         Returns:
             업데이트 성공 여부
@@ -127,6 +134,8 @@ class WildfireVideoTable:
             update_data["video_type"] = video_type
         if video_path:
             update_data["video_path"] = video_path
+        if add_time:
+            update_data["add_time"] = add_time
 
         if not update_data:
             logger.warning("No data to update")

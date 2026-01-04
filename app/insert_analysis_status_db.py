@@ -1,9 +1,9 @@
 """
-비디오 설정 파일을 argument로 받아서 DB에 insert하는 CLI 애플리케이션
+분석 상태 설정 파일을 argument로 받아서 DB에 insert하는 CLI 애플리케이션
 
 사용 방법:
-    python -m app.insert_db config/video_config.1.json
-    python app/insert_db.py config/video_config.1.json --verbose
+    python -m app.insert_analysis_status_db config/analysis_status_config.1.json
+    python app/insert_analysis_status_db.py config/analysis_status_config.1.json --verbose
 """
 
 import sys
@@ -11,7 +11,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from server.backend.service.video_service import WildfireVideoService
+from server.backend.service.analysis_status_service import AnalysisStatusService
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -22,54 +22,65 @@ def setup_logging(verbose: bool = False) -> None:
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler('insert_db.log', encoding='utf-8')
+            logging.FileHandler('insert_analysis_status_db.log', encoding='utf-8')
         ]
     )
+
 
 def print_result(result: dict, config_file_path: str) -> None:
     """결과 출력"""
     print("\n" + "-" * 80)
-    print("📊 Import 결과".center(80))
+    print("📊 분석 상태 Import 결과".center(80))
     print("-" * 80)
     
     print(f"\n📁 설정 파일: {config_file_path}")
     print(f"✅ 성공 여부: {'성공' if result['success'] else '실패'}")
-    print(f"📦 총 개수: {result['total']}개")
-    print(f"✔️ Import 성공: {result['imported']}개")
-    print(f"❌ 실패: {result['failed']}개")
+    print(f"📦 총 개수: {result['total_count']}개")
+    print(f"✔️ Import 성공: {result['saved_count']}개")
+    print(f"❌ 실패: {result['failed_count']}개")
     
     if result['errors']:
         print(f"\n⚠️ 에러 메시지:")
         for idx, error in enumerate(result['errors'], 1):
             print(f"   [{idx}] {error}")
     
+    if result.get('record_ids'):
+        print(f"\n📋 저장된 레코드 ID:")
+        for idx, record_id in enumerate(result['record_ids'], 1):
+            print(f"   [{idx}] {record_id}")
+    
     print("\n" + "=" * 80 + "\n")
 
 
-def print_imported_videos(service: WildfireVideoService, frfr_info_id: str) -> None:
-    """Import된 비디오 정보 출력"""
-    videos = service.get_videos_by_frfr_id(frfr_info_id)
+def print_imported_status(
+    service: AnalysisStatusService,
+    analysis_id: str,
+    frfr_info_id: str
+) -> None:
+    """Import된 분석 상태 정보 출력"""
+    status_list = service.get_analysis_status(analysis_id, frfr_info_id)
     
-    if not videos:
-        print(f"⚠️ {frfr_info_id}에 대한 비디오 정보가 없습니다.\n")
+    if not status_list:
+        print(
+            f"⚠️ {analysis_id}/{frfr_info_id}에 대한 분석 상태 정보가 없습니다.\n"
+        )
         return
     
-    print(f"\n📋 Import된 비디오 정보 (frfr_info_id: {frfr_info_id})")
+    print(f"\n📋 Import된 분석 상태 정보")
+    print(f"   분석 ID: {analysis_id}")
+    print(f"   산불 정보 ID: {frfr_info_id}")
     print("-" * 80)
-    print(f"총 {len(videos)}개의 비디오\n")
+    print(f"총 {len(status_list)}개의 분석 상태 레코드\n")
     
-    # video_type별로 그룹화
-    grouped_by_type = {}
-    for video in videos:
-        if video.video_type not in grouped_by_type:
-            grouped_by_type[video.video_type] = []
-        grouped_by_type[video.video_type].append(video)
-    
-    for video_type, videos_of_type in sorted(grouped_by_type.items()):
-        print(f"  📺 {video_type} ({len(videos_of_type)}개)")
-        for idx, video in enumerate(videos_of_type, 1):
-            print(f"     [{idx}] {video.video_name}")
-            print(f"         경로: {video.video_path}")
+    if isinstance(status_list, dict):
+        # 단일 레코드인 경우
+        print(f"  📺 {status_list.get('video_name', 'N/A')}")
+        print(f"     상태: {status_list.get('analysis_status', 'N/A')}")
+    else:
+        # 리스트인 경우
+        for idx, status in enumerate(status_list, 1):
+            print(f"  [{idx}] {status.get('video_name', 'N/A')}")
+            print(f"       상태: {status.get('analysis_status', 'N/A')}")
     
     print()
 
@@ -77,13 +88,13 @@ def print_imported_videos(service: WildfireVideoService, frfr_info_id: str) -> N
 def parse_arguments() -> argparse.Namespace:
     """명령줄 인자 파싱"""
     parser = argparse.ArgumentParser(
-        description='비디오 설정 파일을 읽어서 DB에 저장합니다.',
+        description='분석 상태 설정 파일을 읽어서 DB에 저장합니다.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 예제:
-  python -m app.insert_db config/video_config.1.json
-  python app/insert_db.py config/video_config.1.json --verbose
-  python app/insert_db.py config/video_config.1.json --show-videos
+  python -m app.insert_analysis_status_db config/analysis_status_config.1.json
+  python app/insert_analysis_status_db.py config/analysis_status_config.1.json --verbose
+  python app/insert_analysis_status_db.py config/analysis_status_config.1.json --show-status
         """
     )
     
@@ -100,9 +111,9 @@ def parse_arguments() -> argparse.Namespace:
     )
     
     parser.add_argument(
-        '-s', '--show-videos',
+        '-s', '--show-status',
         action='store_true',
-        help='Import 완료 후 저장된 비디오 정보 표시'
+        help='Import 완료 후 저장된 분석 상태 정보 표시'
     )
     
     parser.add_argument(
@@ -151,13 +162,19 @@ def main() -> int:
         return 1
     
     try:
-        # WildfireVideoService 초기화
-        logger.info("WildfireVideoService 초기화 중...")
-        service = WildfireVideoService()
+        # AnalysisStatusService 초기화
+        logger.info("AnalysisStatusService 초기화 중...")
+        service = AnalysisStatusService()
+        
+        # JSON 파일 읽기
+        import json
+        logger.info(f"설정 파일 읽기: {args.config_file}")
+        with open(args.config_file, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
         
         # Import 실행
         logger.info(f"Import 시작: {args.config_file}")
-        result = service.import_from_config_file(args.config_file)
+        result = service.save_analysis_status_batch(config_data)
         
         # 결과 출력
         print_result(result, args.config_file)
@@ -167,14 +184,12 @@ def main() -> int:
             logger.error("Import 실패")
             return 1
         
-        # --show-videos 옵션 처리
-        if args.show_videos and result['success']:
-            import json
-            with open(args.config_file, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            frfr_info_id = config.get('frfr_info_id')
-            if frfr_info_id:
-                print_imported_videos(service, frfr_info_id)
+        # --show-status 옵션 처리
+        if args.show_status and result['success']:
+            analysis_id = config_data.get('analysis_id')
+            frfr_info_id = config_data.get('frfr_info_id')
+            if analysis_id and frfr_info_id:
+                print_imported_status(service, analysis_id, frfr_info_id)
         
         logger.info("✅ Import 완료 (성공)")
         print("✅ 모든 작업이 성공적으로 완료되었습니다.\n")

@@ -5,7 +5,7 @@ from server.backend.db.database import (
 from server.backend.db.table import (
     WildfireTable,
     WildfireVideoTable,
-    AnalysisTable
+    AnalysisStatusTable
 )
 
 __all__ = [
@@ -13,5 +13,5 @@ __all__ = [
     "get_shared_database",
     "WildfireTable",
     "WildfireVideoTable",
-    "AnalysisTable",
+    "AnalysisStatusTable",
 ]
