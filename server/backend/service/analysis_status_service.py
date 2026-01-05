@@ -43,6 +43,7 @@ class AnalysisStatusService:
     ) -> Dict[str, Any]:
         """
         JSON 형식의 분석 상태 데이터를 배치로 저장합니다.
+        데이터가 존재하면 update, 없으면 insert를 수행합니다.
 
         Args:
             request_data: 다음 구조의 딕셔너리
@@ -91,18 +92,54 @@ class AnalysisStatusService:
             # 각 비디오 업데이트를 처리
             for idx, video_update in enumerate(video_updates):
                 try:
-                    record_id = self.analysis_status_table.insert(
-                        analysis_id=analysis_id,
-                        frfr_info_id=frfr_info_id,
-                        video_name=video_update.video_name,
-                        analysis_status=video_update.analysis_status,
-                    )
-                    record_ids.append(record_id)
-                    saved_count += 1
-                    logger.debug(
-                        f"Successfully saved record {idx + 1}/{total_count}: "
-                        f"{video_update.video_name} -> {video_update.analysis_status}"
-                    )
+                    # 특정 video_name을 가진 데이터 존재 여부 확인
+                    # analysis_id, frfr_info_id, video_name의 복합키로 확인
+                    all_status = self.get_all_status_by_analysis_id(analysis_id)
+                    existing_video = None
+                    
+                    for status in all_status:
+                        if (status.get("video_name") == video_update.video_name and 
+                            status.get("frfr_info_id") == frfr_info_id):
+                            existing_video = status
+                            break
+                    
+                    if existing_video:
+                        # 같은 video_name을 가진 데이터가 존재하면 update 수행
+                        update_success = self.update_analysis_status(
+                            analysis_id=analysis_id,
+                            frfr_info_id=frfr_info_id,
+                            video_name=video_update.video_name,
+                            analysis_status=video_update.analysis_status,
+                        )
+                        if update_success:
+                            record_ids.append(f"updated_{analysis_id}_{frfr_info_id}_{video_update.video_name}")
+                            saved_count += 1
+                            logger.debug(
+                                f"Successfully updated record {idx + 1}/{total_count}: "
+                                f"{video_update.video_name} -> {video_update.analysis_status}"
+                            )
+                        else:
+                            failed_count += 1
+                            error_msg = (
+                                f"Failed to update record {idx + 1}/{total_count}: "
+                                f"Update operation failed"
+                            )
+                            errors.append(error_msg)
+                            logger.error(error_msg)
+                    else:
+                        # 같은 video_name의 데이터가 없으면 insert 수행
+                        record_id = self.analysis_status_table.insert(
+                            analysis_id=analysis_id,
+                            frfr_info_id=frfr_info_id,
+                            video_name=video_update.video_name,
+                            analysis_status=video_update.analysis_status,
+                        )
+                        record_ids.append(record_id)
+                        saved_count += 1
+                        logger.debug(
+                            f"Successfully inserted record {idx + 1}/{total_count}: "
+                            f"{video_update.video_name} -> {video_update.analysis_status}"
+                        )
                 except Exception as e:
                     failed_count += 1
                     error_msg = (
@@ -281,3 +318,31 @@ class AnalysisStatusService:
         """
         return self.analysis_status_table.get_all()
 
+    def check_analysis_status_exists(self, analysis_id: str) -> bool:
+        """
+        특정 분석 ID의 상태 정보가 존재하는지 확인합니다.
+
+        Args:
+            analysis_id: 분석 ID
+
+        Returns:
+            데이터 존재 여부 (True: 존재, False: 미존재)
+        """
+        try:
+            logger.info(f"Checking if analysis status exists for {analysis_id}")
+            
+            analysis_status_list = self.get_all_status_by_analysis_id(analysis_id)
+            
+            if not analysis_status_list:
+                logger.warning(f"No analysis status found for analysis_id={analysis_id}")
+                return False
+            
+            logger.info(f"Analysis status exists for {analysis_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to check analysis status existence for {analysis_id}: "
+                f"{str(e)}"
+            )
+            return False

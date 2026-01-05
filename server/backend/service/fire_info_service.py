@@ -175,3 +175,33 @@ class FireInfoService:
             모든 산불 정보 리스트
         """
         return self.wildfire_table.get_all()
+
+    def check_fire_location_exists(self, frfr_info_id: str) -> bool:
+        """
+        특정 산불 위치 정보가 존재하는지 확인합니다.
+
+        Args:
+            frfr_info_id: 산불 정보 ID
+
+        Returns:
+            데이터 존재 여부 (True: 존재, False: 미존재)
+        """
+        try:
+            logger.info(f"Checking if fire location exists for {frfr_info_id}")
+            
+            fire_location_data = self.get_fire_location(frfr_info_id)
+            
+            if not fire_location_data:
+                logger.warning(f"Fire location not found for {frfr_info_id}")
+                return False
+            
+            logger.info(f"Fire location exists for {frfr_info_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to check fire location existence for {frfr_info_id}: "
+                f"{str(e)}"
+            )
+            return False
+

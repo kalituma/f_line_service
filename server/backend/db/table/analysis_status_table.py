@@ -6,7 +6,6 @@ from server.backend.db.database import get_shared_database, SharedDatabase
 
 logger = logging.getLogger(__name__)
 
-
 class AnalysisStatusTable:
     """AnalysisStatus 테이블 관리 (복합키: analysis_id + frfr_info_id)"""
 
@@ -123,6 +122,7 @@ class AnalysisStatusTable:
     ) -> bool:
         """
         분석 정보를 업데이트합니다.
+        analysis_id, frfr_info_id, video_name의 복합키로 레코드를 찾아서 업데이트합니다.
 
         Args:
             analysis_id: 분석 ID
@@ -145,21 +145,23 @@ class AnalysisStatusTable:
             logger.warning("No data to update")
             return False
 
+        # 복합키 (analysis_id, frfr_info_id, video_name) 로 기존 레코드를 찾아서 업데이트
         result = self.table.update(
             update_data,
             (analysis.analysis_id == analysis_id)
-            & (analysis.frfr_info_id == frfr_info_id),
+            & (analysis.frfr_info_id == frfr_info_id)
+            & (analysis.video_name == video_name),
         )
 
         if result:
             logger.info(
-                f"Updated analysis record: {analysis_id}/{frfr_info_id}"
+                f"Updated analysis record: {analysis_id}/{frfr_info_id}/{video_name}"
             )
             return True
         else:
             logger.warning(
                 f"Failed to update analysis record: "
-                f"{analysis_id}/{frfr_info_id}"
+                f"{analysis_id}/{frfr_info_id}/{video_name}"
             )
             return False
 

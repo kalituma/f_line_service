@@ -21,21 +21,23 @@ def validate_config(config_data: Dict[str, Any], required_fields: List[AnyStr]) 
             logger.error(f"Missing required field: {field}")
             return False
 
-    if not isinstance(config_data["video_info"], list):
-        logger.error("video_info must be a list")
-        return False
+    if "video_info" in config_data:
 
-    if len(config_data["video_info"]) == 0:
-        logger.warning("video_info list is empty")
-        return False
-
-    for idx, video_item in enumerate(config_data["video_info"]):
-        if "video_type" not in video_item or "video_path" not in video_item:
-            logger.error(
-                f"video_info[{idx}] missing required fields "
-                f"(video_type, video_path)"
-            )
+        if not isinstance(config_data["video_info"], list):
+            logger.error("video_info must be a list")
             return False
+
+        if len(config_data["video_info"]) == 0:
+            logger.warning("video_info list is empty")
+            return False
+
+        for idx, video_item in enumerate(config_data["video_info"]):
+            if "video_type" not in video_item or "video_path" not in video_item:
+                logger.error(
+                    f"video_info[{idx}] missing required fields "
+                    f"(video_type, video_path)"
+                )
+                return False
 
     logger.info("Config validation passed")
     return True
