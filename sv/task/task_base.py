@@ -1,11 +1,9 @@
 import logging
 from typing import Dict, Any
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from sv.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 class TaskBase:
     """작업의 기본 클래스"""

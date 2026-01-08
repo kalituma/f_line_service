@@ -1,14 +1,12 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 import uvicorn
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from server.response_obj import WildfireResponse, FireLocation, VideoInfo, WildfireVideoRequest
 from server.routers import sender, video_status, analyzed_data
-app = FastAPI(title="Mock Fline API Server")
+app = FastAPI(title="Server mocking backend for testing data-interchange between AI and Backend Layer")
 
 # ==================== API Endpoints ====================
 app.include_router(sender.router)
@@ -18,7 +16,7 @@ app.include_router(analyzed_data.router)
 @app.get("/health")
 async def health_check():
     """헬스 체크 엔드포인트"""
-    return {"status": "ok", "service": "Mock Fline API Server"}
+    return {"status": "ok", "service": "Mock Backend Server"}
 
 
 if __name__ == '__main__':

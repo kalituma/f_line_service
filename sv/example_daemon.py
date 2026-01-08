@@ -6,8 +6,8 @@ FLineDaemon 사용 예시
 
 import logging
 
-from sv.daemon import FLineDaemon
-from sv.tasks import (
+from sv.daemon.scheduling_daemon import FLineDaemon
+from sv.task.tasks import (
     VideoProcessingTask,
     AnalysisTask,
     ReportGenerationTask,
@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 def main():
     """메인 함수 - Daemon 시작"""
     
-    # 1. Daemon 초기화 (15분 간격으로 루프 실행)
+    # 1. Daemon 초기화s
     daemon = FLineDaemon(
-        interval_minutes=1,  # 테스트를 위해 1분으로 설정 (실제는 15분 등으로 설정)
+        interval_seconds=60,  # 테스트를 위해 1분으로 설정 (실제는 15분 등으로 설정)
         num_executors=3,      # 3개의 Executor 사용
         use_actors=True       # Actor 기반 실행
     )
@@ -68,7 +68,7 @@ def main():
 def example_custom_task():
     """사용자 정의 작업을 추가하는 예시"""
     
-    from sv.executor import TaskBase
+    from sv.backup.executor import TaskBase
     
     class CustomTask(TaskBase):
         """사용자 정의 작업 예시"""

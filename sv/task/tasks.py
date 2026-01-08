@@ -1,10 +1,11 @@
-import logging
 import time
 from typing import Dict, Any
 
-from sv.executor import TaskBase
+from sv.backup.executor import TaskBase
 
-logger = logging.getLogger(__name__)
+from sv.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class VideoProcessingTask(TaskBase):

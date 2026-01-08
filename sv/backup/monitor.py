@@ -2,15 +2,11 @@ import ray
 from typing import Dict, Any
 from datetime import datetime
 import requests
-import logging
 
-from sv.executor import FlineTaskExecutor, execute_task
+from sv.backup.executor import FlineTaskExecutor, execute_task
+from sv.utils.logger import setup_logger
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 class FlineTaskMonitor:
     """Ray를 사용한 작업 모니터"""

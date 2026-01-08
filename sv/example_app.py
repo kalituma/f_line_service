@@ -8,7 +8,7 @@ IDE의 디버거에서 각 task의 실행을 단계적으로 추적할 수 있�
 import logging
 from typing import Dict, Any
 
-from sv.tasks import (
+from sv.task.tasks import (
     VideoProcessingTask,
     AnalysisTask,
     ReportGenerationTask,

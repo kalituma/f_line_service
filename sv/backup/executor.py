@@ -12,9 +12,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Ray 초기화
-ray.init(num_cpus=8)  # CPU 코어 수에 맞게 조정
+# Ray 초기화는 메인 스크립트에서 수행하세요
+# 예: ray.init(num_cpus=8, ignore_reinit_error=True)
 
+@ray.remote
 class FlineTaskExecutor:
     """Ray Actor로 작업을 실행하는 클래스"""
 
