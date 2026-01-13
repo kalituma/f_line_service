@@ -1,7 +1,7 @@
 import time
 from typing import List, Callable, Dict, Any
 from enum import Enum
-from sv.backend.service.job_queue_service import JobQueueService
+from sv.backend.service.service_manager import get_service_manager
 from sv.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -46,7 +46,7 @@ class DBChangeListener:
             poll_interval: 폴링 간격 (초)
         """        
         
-        self.job_queue_service = JobQueueService()
+        self.job_queue_service = get_service_manager().get_job_queue_service()
         self.poll_interval = poll_interval
         self.callbacks: List[Callable[[DBChangeEvent], None]] = []
         
@@ -80,7 +80,6 @@ class DBChangeListener:
             감지된 변경 이벤트 리스트
         """
         events = []
-        table_key = f"job_queue_{status}"
         
         try:
             # 서비스 레이어를 통해 pending jobs 조회
@@ -126,7 +125,7 @@ class DBChangeListener:
             해당 상태의 Job 개수
         """
         try:
-            from sv.backend.db.job_queue_db import JobStatus
+            from sv.backend.job_status import JobStatus
             
             # 상태값을 JobStatus enum으로 변환
             status_enum = JobStatus(status)

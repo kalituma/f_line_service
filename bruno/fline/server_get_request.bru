@@ -1,0 +1,15 @@
+meta {
+  name: server_get_request
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://127.0.0.1:8086/wildfire-data-sender/api/wildfire/sender
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+}

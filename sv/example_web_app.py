@@ -9,7 +9,7 @@ except ImportError:
 from sv import LOG_DIR_PATH
 from sv.utils.logger import setup_common_logger, setup_logger
 
-from sv.backend.service.app_state import get_app_state_manager, AppState
+from sv.backend.service.app_state_manager import get_app_state_manager, AppState
 logger = setup_logger(__name__)
 
 def initialize_logger(log_dir_path=None):

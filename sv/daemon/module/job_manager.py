@@ -1,8 +1,7 @@
 from typing import Optional, Dict, Any
 
-from sv.backend.service.job_queue_service import JobQueueService
 from sv.utils.logger import setup_logger
-
+from sv.backend.service.service_manager import get_service_manager
 logger = setup_logger(__name__)
 
 
@@ -10,7 +9,7 @@ class JobManager:
     """Job 생명주기 관리"""
     
     def __init__(self):
-        self.job_queue_service = JobQueueService()
+        self.job_queue_service = get_service_manager().get_job_queue_service()
     
     def add_job(self, frfr_id: str, analysis_id: str) -> Optional[int]:
         """
@@ -50,18 +49,18 @@ class JobManager:
             logger.error(f"❌ Error getting job status: {str(e)}")
             return None
     
-    def get_next_pending_job(self) -> Optional[int]:
+    def get_next_pending_job(self) -> Optional[Dict[str, Any]]:
         """
         다음 PENDING Job 가져오기
         
         Returns:
-            job_id 또는 None
+            {'job_id': int, 'frfr_id': str} 또는 None
         """
         try:
-            job_id = self.job_queue_service.get_next_job()
-            if job_id:
-                logger.debug(f"Next pending job: {job_id}")
-            return job_id
+            job_info = self.job_queue_service.get_next_job()
+            if job_info:
+                logger.debug(f"Next pending job: {job_info}")
+            return job_info
         except Exception as e:
             logger.error(f"❌ Error getting next job: {str(e)}")
             return None

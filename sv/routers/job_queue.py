@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from sv.backend.service.job_queue_service import JobQueueService
+from sv.backend.service.service_manager import get_service_manager
 from sv.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-router = APIRouter(prefix="/f_line_service/jobs", tags=["job-queue"])
+router = APIRouter(prefix="/f_line_service", tags=["job-queue"])
 
 # ==================== Request/Response Models ====================
 
@@ -30,7 +30,7 @@ async def add_job(request: AddJobRequest):
         - success: 성공 여부
     """
     try:
-        service = JobQueueService()
+        service = get_service_manager().get_job_queue_service()
         job_id = service.add_job(request.frfr_info_id, request.analysis_id)
         
         if job_id is None:
@@ -47,32 +47,6 @@ async def add_job(request: AddJobRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/status/{job_id}", response_model=dict)
-async def get_job_status(job_id: int):
-    """
-    작업 ID로 작업 정보를 조회합니다.
-
-    - **job_id**: 작업 ID
-
-    Returns:
-        작업 정보 (없으면 404 에러)
-    """
-    try:
-        service = JobQueueService()
-        job = service.get_job_by_id(job_id)
-
-        if job is None:
-            raise HTTPException(status_code=404, detail=f"Job not found: job_id={job_id}")
-
-        return {"success": True, "job": job}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting job: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/status/jobs", response_model=dict)
 async def get_all_jobs():
     """
@@ -82,7 +56,7 @@ async def get_all_jobs():
         모든 작업 정보 (JSON 배열)
     """
     try:
-        service = JobQueueService()
+        service = get_service_manager().get_job_queue_service()
         jobs = service.get_all_jobs()
         
         logger.info(f"Retrieved {len(jobs)} jobs via API")
@@ -97,6 +71,32 @@ async def get_all_jobs():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/status/{job_id}", response_model=dict)
+async def get_job_status(job_id: int):
+    """
+    작업 ID로 작업 정보를 조회합니다.
+
+    - **job_id**: 작업 ID
+
+    Returns:
+        작업 정보 (없으면 404 에러)
+    """
+    try:
+        service = get_service_manager().get_job_queue_service()
+        job = service.get_job_by_id(job_id)
+
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Job not found: job_id={job_id}")
+
+        return {"success": True, "job": job}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting job: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/status/tasks", response_model=dict)
 async def get_all_tasks():
     """
@@ -106,7 +106,7 @@ async def get_all_tasks():
         모든 태스크 정보 (JSON 배열)
     """
     try:
-        service = JobQueueService()
+        service = get_service_manager().get_job_queue_service()
         tasks = service.get_all_tasks()
         
         logger.info(f"Retrieved {len(tasks)} tasks via API")

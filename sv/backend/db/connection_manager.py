@@ -20,7 +20,6 @@ class DBConnectionManager:
                     instance = super().__new__(cls)
                     instance._initialized = False
                     cls._instances[db_path] = instance
-                    Path(db_path).mkdir(parents=True, exist_ok=True)
 
         return cls._instances[db_path]
 

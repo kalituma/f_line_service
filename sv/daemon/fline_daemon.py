@@ -9,7 +9,7 @@ except ImportError:
 from sv import LOG_DIR_PATH
 from sv.utils.logger import setup_common_logger, setup_logger
 
-from sv.backend.service.app_state import get_app_state_manager, AppState
+from sv.backend.service.app_state_manager import get_app_state_manager, AppState
 from sv.daemon.module.recovery_check import RecoveryCheckService
 
 from sv.daemon.module.job_manager import JobManager
@@ -18,7 +18,7 @@ from sv.daemon.module.event_processor import EventProcessor
 from sv.daemon.module.execution_engine import ExecutionEngine
 from sv.daemon.module.thread_manager import ThreadManager
 
-from sv.backend.f_line_server import initialize_web_app
+from sv.backend.f_line_webserver import initialize_web_app
 
 logger = setup_logger(__name__)
 
@@ -47,11 +47,9 @@ class FlineDaemon:
     """
     def __init__(
         self,
+        base_work_dir: str,
         num_executors: int = 2,
         poll_interval: float = 2.0,
-        fallback_poll_interval: int = 30,
-        enable_fallback_polling: bool = True,
-        enable_event_listener: bool = True,
         web_host: str = "localhost",
         web_port: int = 8090,
     ):
@@ -59,9 +57,6 @@ class FlineDaemon:
         Args:
             num_executors: Ray Actor 개수
             poll_interval: Event Listener 폴링 간격
-            fallback_poll_interval: Fallback Polling 간격
-            enable_fallback_polling: Fallback Polling 활성화
-            enable_event_listener: Event Listener 활성화
         """
 
         self.web_app = initialize_web_app(self)
@@ -71,19 +66,22 @@ class FlineDaemon:
         # ==================== 컴포넌트 초기화 ====================
         self.job_manager = JobManager()
         self.task_manager = TaskManager()
-        self.execution_engine = ExecutionEngine(num_executors)
+
         self.event_processor = EventProcessor(
             poll_interval=poll_interval,
             on_job_created=self._on_job_created
-        )
+        ) # including listener
+
+        # ExecutionEngine 먼저 초기화
+        self.execution_engine = ExecutionEngine(base_work_dir, num_executors)
+        
+        # ThreadManager 초기화 시 ExecutionEngine 전달
         self.thread_manager = ThreadManager(
             poll_interval=poll_interval,
-            fallback_poll_interval=fallback_poll_interval,
-            enable_event_listener=enable_event_listener,
-            enable_fallback_polling=enable_fallback_polling,
             web_app=self.web_app,
             web_host=web_host,
-            web_port=web_port
+            web_port=web_port,
+            execution_engine=self.execution_engine  # Ray Job Monitor를 위해 전달
         )
         
         # Thread Manager 콜백 설정
@@ -98,8 +96,6 @@ class FlineDaemon:
         logger.info("   FlineDaemon initialized")
         logger.info(f"  Executors: {num_executors}")
         logger.info(f"  Poll Interval: {poll_interval}s")
-        logger.info(f"  Event Listener: {enable_event_listener}")
-        logger.info(f"  Fallback Polling: {enable_fallback_polling}")
         logger.info("=" * 80)
     
     # ==================== Job Management API ====================
@@ -137,40 +133,51 @@ class FlineDaemon:
     
     # ==================== Internal Event Handlers ====================
     
-    async def _on_job_created(self) -> None:
+    def _on_job_created(self) -> None:
         """Job 생성 감지 시 핸들러 (Event Processor에서 호출)"""
         logger.info("Job creation event detected")
-        await self._process_pending_jobs()
+        self._process_pending_jobs()
     
-    async def _process_pending_jobs(self) -> None:
+    def _process_pending_jobs(self) -> None:
         """
-        대기 중인 Job 처리
+        대기 중인 Job 처리 (비동기 콜백 방식)
         
         Flow:
         1. 다음 PENDING Job 가져오기
-        2. Task 실행
-        3. 결과 로깅
-        4. 상태 업데이트
+        2. Task 실행 (논블로킹)
+        3. 완료 시 _on_job_complete 콜백 호출
         """
-        job_id = self.job_manager.get_next_pending_job()
+        job_info = self.job_manager.get_next_pending_job()
         
-        if not job_id:
+        if not job_info:
             logger.debug("No pending jobs")
             return
         
         # Task 실행 준비 확인
         if not self.task_manager.are_tasks_ready():
             logger.error("❌ Tasks not ready for execution")
-            self.job_manager.update_job_status(job_id, "failed")
             return
         
-        # Task 실행
-        result = await self.execution_engine.execute_job(
-            job_id=job_id,
+        # Task 실행 (논블로킹 - 콜백 방식)
+        self.execution_engine.execute_job(
+            job_info=job_info,
             primary_task=self.task_manager.primary_task,
             secondary_tasks=self.task_manager.secondary_tasks,
-            data_splitter=self.task_manager.data_splitter
+            data_splitter=self.task_manager.data_splitter,
+            on_complete=self._on_job_complete  # 콜백 함수
         )
+        
+        logger.info(f"✓ Job {job_info['job_id']} (frfr_id={job_info['frfr_id']}) submitted")
+    
+    def _on_job_complete(self, job_id: int, result: Dict[str, Any]) -> None:
+        """
+        Job 완료 시 호출되는 콜백 함수
+        
+        Args:
+            job_id: 완료된 Job ID
+            result: 실행 결과
+        """
+        logger.info(f"📥 Job {job_id} completed callback received")
         
         # 결과 로깅
         self.execution_engine.log_execution_result(job_id, result)
@@ -178,6 +185,8 @@ class FlineDaemon:
         # 상태 업데이트
         status = "completed" if result.get('status') == 'success' else "failed"
         self.job_manager.update_job_status(job_id, status)
+        
+        logger.info(f"✅ Job {job_id} status updated to: {status}")
 
     async def restore_and_init(self) -> bool:
         """
@@ -240,7 +249,7 @@ class FlineDaemon:
             f"Running: {status['daemon']['running']} | "
             f"Tasks: {status['tasks']['secondary_tasks_count']} | "
             f"Listener: {status['threads']['listener_active']} | "
-            f"Polling: {status['threads']['polling_active']}"
+            f"RayMonitor: {status['threads']['ray_monitor_active']}"
         )
 
 if __name__ == '__main__':

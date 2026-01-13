@@ -3,47 +3,108 @@ AI 모델로 분석 그룹을 순차 전송하는 스케줄러의 핵심 루프.
 """
 import sys
 import time
+import random
+import string
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, List
 
 import requests
 from loguru import logger
 
-from config import settings
-from database import fetch_group001_pending, fetch_statuses, mark_as_in_progress
-from ai_runner import start_analysis
-from state_store import StateStore
+from server.seesun.config import settings
+from server.seesun.ai_runner import start_analysis
+from server.seesun.state_store import StateStore
+
+from sv.daemon.module.http_request_client import get_json
+
+def fetch_group001_pending() -> List[Dict]:
+    """
+    HTTP GET 요청으로 wildfire-data-sender API에서 데이터를 가져온다.
+    응답 형식: {"total_count": 1, "data": [{"frfr_info_id": "123456", "analysis_id": "20251222_1706_VIDEO_003"}]}
+    """
+    try:
+        url = "http://127.0.0.1:8086/wildfire-data-sender/api/wildfire/sender"
+        response_data = get_json(url, timeout=10, verify_ssl=False)
+        
+        logger.info(f"Wildfire sender API 응답: {response_data}")
+        
+        mock_data = []
+        if isinstance(response_data, dict) and "data" in response_data:
+            for item in response_data.get("data", []):
+                mock_data.append({
+                    "analysis_id": item.get("analysis_id"),
+                    "event_cd": item.get("frfr_info_id"),
+                    "status": "GROUP_001",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+        
+        logger.info(f"변환된 mock_data: {mock_data}")
+        return mock_data
+    except Exception as e:
+        logger.error(f"Wildfire sender API 요청 실패: {e}")
+        # 실패 시 빈 리스트 반환
+        return []
 
 
+def fetch_statuses(sent_ids: List[str]) -> Dict[str, str]:
+    """
+    주어진 analysis_id 목록에 대해 가상의 상태 데이터를 반환한다.
+    실제 database 대신 테스트용 mock 상태를 반환한다.
+    """
+    statuses = {}
+    for aid in sent_ids:
+        # 임의로 GROUP_002, GROUP_003, GROUP_004 중 하나를 선택
+        status = random.choice(["GROUP_002", "GROUP_003", "GROUP_004"])
+        statuses[aid] = status
+    return statuses
+
+
+def mark_as_in_progress(analysis_id: str) -> None:
+    """
+    주어진 analysis_id를 in_progress 상태로 표시한다.
+    실제 database 대신 로깅만 수행한다.
+    """
+    logger.debug(f"[Mock] analysis_id={analysis_id}를 in_progress 상태로 표시")
+
+
+# ===== AnalysisDispatcher 클래스 =====
 class AnalysisDispatcher:
-    def __init__(self, send_func: Optional[Callable[[Dict], bool]] = None):
+    def __init__(self, send_func: Optional[Callable[[Dict], bool]] = None, run_once: bool = False):
         """로깅, 상태 저장소를 초기화하고 전송 함수를 주입한다."""
         logger.remove()
         logger.add(sys.stdout, level=settings.log_level)
         self.state = StateStore(settings.state_file)
+        self.run_once = run_once
         # 기본값은 내부 함수 호출; 필요 시 HTTP 전송 함수로 교체 가능
         self.send_func = send_func or self._send_to_ai_local
         logger.info(
-            "분석 디스패처 초기화: 전송 간격={}분, 폴링주기={}초",
+            "분석 디스패처 초기화: 전송 간격={}분, 폴링주기={}초, 1회 실행 모드={}",
             settings.dispatch_interval_minutes,
             settings.poll_interval_seconds,
+            self.run_once,
         )
 
     def run_forever(self):
-        """폴링 주기에 따라 무한 루프로 디스패치를 수행한다."""
+        """폴링 주기에 따라 무한 루프로 디스패치를 수행한다. run_once=True면 1회만 실행한다."""
         while True:
             try:
                 self._tick()
             except Exception as exc:
                 logger.exception(f"디스패치 주기 실패: {exc}")
+            
+            if self.run_once:
+                logger.info("1회 실행 모드: 디스패치 종료")
+                break
+            
             time.sleep(settings.poll_interval_seconds)
 
     def _tick(self):
         """한 번의 디스패치 사이클을 수행한다."""
         self._prune_completed_dispatches()
 
-        if not self._can_dispatch_now():
-            return
+        if not self.run_once:
+            if not self._can_dispatch_now():
+                return
 
         candidate = self._next_candidate()
         if not candidate:
@@ -181,4 +242,3 @@ class AnalysisDispatcher:
         removed = self.state.prune_completed(completed)
         if removed:
             logger.info("로컬 상태에서 완료된 전송 %s건 제거", removed)
-

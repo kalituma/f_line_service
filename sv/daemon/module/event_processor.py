@@ -1,5 +1,4 @@
 from typing import Callable, Optional
-import asyncio
 from sv.daemon.module.db_change_listener import DBChangeListener, DBChangeEvent, ChangeEventType
 from sv.utils.logger import setup_logger
 
@@ -17,7 +16,6 @@ class EventProcessor:
         Args:
             poll_interval: 폴링 간격
             db_path: 데이터베이스 경로
-            db_change_callback: 일반 DB 변경 시 콜백
         """
         self.db_listener = DBChangeListener(poll_interval)
         self.db_listener.on_change(self._handle_db_change)
@@ -37,8 +35,8 @@ class EventProcessor:
             logger.info(f"✓ New job detected: {event.data}")
             if self.on_job_created:
                 try:
-                    # 비동기 작업 시작 (이벤트 루프가 있을 경우)
-                    asyncio.create_task(self.on_job_created())
+                    # 단순히 콜백 호출 (Ray가 알아서 비동기 처리)
+                    self.on_job_created()
                 except Exception as e:
                     logger.error(f"Error in on_job_created callback: {str(e)}", exc_info=True)
     
@@ -50,14 +48,4 @@ class EventProcessor:
             self.db_listener.check_pending_jobs()
         except Exception as e:
             logger.error(f"Error checking pending jobs: {str(e)}")
-    
-    def set_custom_callback(self, callback: Callable[[DBChangeEvent], None]) -> None:
-        """
-        커스텀 DB 변경 콜백 설정
-        
-        Args:
-            callback: 실행할 콜백 함수
-        """
-        self.db_change_callback = callback
-        logger.info(f"✓ Custom callback set: {callback.__name__}")
 

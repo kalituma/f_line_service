@@ -1,7 +1,8 @@
 from typing import Optional, List, Dict, Any
 
 from sv import DEFAULT_JOB_QUEUE_DB
-from sv.backend.db.job_queue_db import JobQueue, JobStatus
+from sv.backend.job_status import JobStatus
+from sv.backend.db.job_queue_db import JobQueue
 from sv.backend.db.task_db import TaskQueue
 from sv.utils.logger import setup_logger
 
@@ -10,9 +11,6 @@ logger = setup_logger(__name__)
 class JobQueueService:
     """
     JobQueue와 TaskQueue를 활용한 작업 큐 관리 서비스
-    
-    JobQueue와 TaskQueue는 내부적으로 DBConnectionManager를 통해
-    같은 DB 연결을 공유하므로, 이 서비스는 Singleton이 아니어도 됩니다.
     """
     
     def __init__(self, db_path: str = DEFAULT_JOB_QUEUE_DB):
@@ -59,20 +57,20 @@ class JobQueueService:
             logger.error(f"Error adding job: {str(e)}")
             raise
     
-    def get_next_job(self) -> Optional[int]:
+    def get_next_job(self) -> Optional[Dict[str, Any]]:
         """
         FIFO 순서로 다음 pending 상태의 작업을 가져오고 processing으로 변경합니다.
         
         Returns:
-            처리할 다음 job_id 또는 None (pending 작업이 없는 경우)
+            {'job_id': int, 'frfr_id': str} 또는 None (pending 작업이 없는 경우)
         """
         try:
-            job_id = self.job_queue.pop_next_job()
-            if job_id:
-                logger.info(f"Next job retrieved: job_id={job_id}")
+            job_info = self.job_queue.pop_next_job()
+            if job_info:
+                logger.info(f"Next job retrieved: job_id={job_info['job_id']}, frfr_id={job_info['frfr_id']}")
             else:
                 logger.info("No pending jobs available")
-            return job_id
+            return job_info
         except Exception as e:
             logger.error(f"Error getting next job: {str(e)}")
             raise
@@ -331,4 +329,46 @@ class JobQueueService:
             return tasks
         except Exception as e:
             logger.error(f"Error getting all tasks: {str(e)}")
+            raise
+    
+    def delete_job(self, job_id: int) -> bool:
+        """
+        작업을 삭제합니다.
+        
+        Args:
+            job_id: 삭제할 작업 ID
+            
+        Returns:
+            삭제 성공 여부
+        """
+        try:
+            success = self.job_queue.delete_job(job_id)
+            if success:
+                logger.info(f"Job deleted: job_id={job_id}")
+            else:
+                logger.warning(f"Failed to delete job: job_id={job_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error deleting job {job_id}: {str(e)}")
+            raise
+    
+    def delete_task(self, task_id: int) -> bool:
+        """
+        작업 태스크를 삭제합니다.
+        
+        Args:
+            task_id: 삭제할 태스크 ID
+            
+        Returns:
+            삭제 성공 여부
+        """
+        try:
+            success = self.task_queue.delete_task(task_id)
+            if success:
+                logger.info(f"Task deleted: task_id={task_id}")
+            else:
+                logger.warning(f"Failed to delete task: task_id={task_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error deleting task {task_id}: {str(e)}")
             raise

@@ -1,22 +1,11 @@
 from typing import Optional, List
 import sqlite3
-from enum import Enum
 
 from sv.utils.logger import setup_logger
 from sv.backend.db.base_db import BaseDB
+from sv.backend.job_status import JobStatus
 
 logger = setup_logger(__name__)
-
-class JobStatus(Enum):
-    """작업 상태 Enum"""
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    
-    def __str__(self):
-        return self.value
 
 # ==================== JobQueue Class ====================
 
@@ -85,21 +74,26 @@ class JobQueue(BaseDB):
                 logger.error(f"Unexpected error adding job: {str(e)}")
                 return None
 
-    def pop_next_job(self) -> str | None:
-        """FIFO로 다음 pending job 가져와서 processing으로 변경"""
+    def pop_next_job(self) -> Optional[dict]:
+        """
+        FIFO로 다음 pending job 가져와서 processing으로 변경
+        
+        Returns:
+            {'job_id': int, 'frfr_id': str} 또는 None
+        """
         import time
         with self._conn() as conn:
             row = conn.execute(
-                'SELECT job_id FROM job_queue WHERE status = ? ORDER BY created_at ASC LIMIT 1',
+                'SELECT job_id, frfr_id, analysis_id FROM job_queue WHERE status = ? ORDER BY created_at ASC LIMIT 1',
                 (JobStatus.PENDING.value,)
             ).fetchone()
             
             if row:
-                conn.execute(
-                    'UPDATE job_queue SET status = ?, created_at = ? WHERE job_id = ?',
-                    (JobStatus.PROCESSING.value, time.time(), row['job_id'])
-                )
-                return row['job_id']
+                return {
+                    'job_id': row['job_id'],
+                    'frfr_id': row['frfr_id'],
+                    'analysis_id': row['analysis_id']
+                }
         return None
     
     def get_all_jobs(self) -> List[dict]:

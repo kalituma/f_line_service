@@ -3,10 +3,10 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
 from sv.utils.logger import setup_logger
-from sv.backend.service.app_state import get_app_state_manager, AppState
+from sv.backend.service.app_state_manager import get_app_state_manager, AppState
 
 if TYPE_CHECKING:
-    from sv.daemon.fline_daemon import FLineDaemon
+    from sv.daemon.fline_daemon import FlineDaemon
 
 logger = setup_logger(__name__)
 
@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     yield 이후: 종료 시 실행 (shutdown)
     """
     # ==================== Startup ====================
-    daemon:"FLineDaemon" = app.state.daemon
+    daemon:"FlineDaemon" = app.state.daemon
     app_state = get_app_state_manager()
 
     logger.info("=" * 60)
