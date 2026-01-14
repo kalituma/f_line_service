@@ -2,6 +2,8 @@
 data
 config
 __pycache__
+logs
 *.mp4
 *.pyc
 *.log
+f_line_service_test
