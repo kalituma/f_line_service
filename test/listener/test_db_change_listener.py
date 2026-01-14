@@ -28,7 +28,7 @@ class TestDBChangeListener(unittest.TestCase):
     
     def test_initialization(self):
         """리스너 초기화 테스트"""
-        self.assertIsNotNone(self.listener.job_queue_service)
+        self.assertIsNotNone(self.listener.work_queue_service)
         self.assertEqual(self.listener.poll_interval, 1.0)
         self.assertEqual(len(self.listener.callbacks), 1)
     
@@ -42,11 +42,11 @@ class TestDBChangeListener(unittest.TestCase):
         self.mock_service.get_jobs_by_status.return_value = mock_jobs
         
         # Pending Job 확인
-        events = self.listener.check_pending_jobs(status="pending")
+        events = self.listener.check_pending_works(status="pending")
         
         # 검증
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0].event_type, ChangeEventType.PENDING_JOBS_DETECTED)
+        self.assertEqual(events[0].event_type, ChangeEventType.PENDING_WORKS_DETECTED)
         self.assertEqual(events[0].data["count"], 2)
         self.assertEqual(len(events[0].data["jobs"]), 2)
         
@@ -59,7 +59,7 @@ class TestDBChangeListener(unittest.TestCase):
         self.mock_service.get_jobs_by_status.return_value = []
         
         # Pending Job 확인
-        events = self.listener.check_pending_jobs(status="pending")
+        events = self.listener.check_pending_works(status="pending")
         
         # 검증 - 이벤트 없음
         self.assertEqual(len(events), 0)
@@ -73,7 +73,7 @@ class TestDBChangeListener(unittest.TestCase):
             {"job_id": 2, "frfr_id": "FIRE_002", "status": "pending"},
         ]
         
-        events1 = self.listener.check_pending_jobs(status="pending")
+        events1 = self.listener.check_pending_works(status="pending")
         self.assertEqual(len(events1), 1)
         self.assertEqual(events1[0].data["count"], 2)
         
@@ -84,7 +84,7 @@ class TestDBChangeListener(unittest.TestCase):
             {"job_id": 3, "frfr_id": "FIRE_003", "status": "pending"},
         ]
         
-        events2 = self.listener.check_pending_jobs(status="pending")
+        events2 = self.listener.check_pending_works(status="pending")
         self.assertEqual(len(events2), 1)
         self.assertEqual(events2[0].data["count"], 3)
     
@@ -92,7 +92,7 @@ class TestDBChangeListener(unittest.TestCase):
         """Pending Job 존재 확인 - True 케이스"""
         self.mock_service.has_pending_jobs.return_value = True
         
-        result = self.listener.has_pending_jobs()
+        result = self.listener.has_pending_works()
         
         self.assertTrue(result)
         self.mock_service.has_pending_jobs.assert_called_once()
@@ -101,7 +101,7 @@ class TestDBChangeListener(unittest.TestCase):
         """Pending Job 존재 확인 - False 케이스"""
         self.mock_service.has_pending_jobs.return_value = False
         
-        result = self.listener.has_pending_jobs()
+        result = self.listener.has_pending_works()
         
         self.assertFalse(result)
     
@@ -112,7 +112,7 @@ class TestDBChangeListener(unittest.TestCase):
         # 상태 확인
         with patch('sv.backend.db.job_queue.JobStatus') as MockJobStatus:
             MockJobStatus.side_effect = lambda x: x
-            count = self.listener.check_jobs_by_count(status="pending")
+            count = self.listener.check_works_by_count(status="pending")
         
         self.assertEqual(count, 5)
     
@@ -128,7 +128,7 @@ class TestDBChangeListener(unittest.TestCase):
         ]
         
         # 에러가 발생해도 다른 콜백은 계속 실행되어야 함
-        events = self.listener.check_pending_jobs(status="pending")
+        events = self.listener.check_pending_works(status="pending")
         
         self.assertEqual(len(events), 1)
         # 두 콜백 모두 호출되어야 함 (에러가 발생하더라도)
@@ -144,12 +144,12 @@ class TestDBChangeEvent(unittest.TestCase):
         data = {"status": "pending", "count": 2}
         event = DBChangeEvent(
             table_name="job_queue",
-            event_type=ChangeEventType.PENDING_JOBS_DETECTED,
+            event_type=ChangeEventType.PENDING_WORKS_DETECTED,
             data=data
         )
         
         self.assertEqual(event.table_name, "job_queue")
-        self.assertEqual(event.event_type, ChangeEventType.PENDING_JOBS_DETECTED)
+        self.assertEqual(event.event_type, ChangeEventType.PENDING_WORKS_DETECTED)
         self.assertEqual(event.data, data)
         self.assertIsNotNone(event.timestamp)
     
@@ -157,7 +157,7 @@ class TestDBChangeEvent(unittest.TestCase):
         """이벤트 문자열 표현 테스트"""
         event = DBChangeEvent(
             table_name="job_queue",
-            event_type=ChangeEventType.PENDING_JOBS_DETECTED,
+            event_type=ChangeEventType.PENDING_WORKS_DETECTED,
             data={"count": 2}
         )
         

@@ -11,9 +11,9 @@ from sv import LOG_DIR_PATH
 from sv.backup.monitor import FlineTaskMonitor
 from sv.backup.executor import FlineTaskExecutor, TaskBase
 from sv.utils.logger import setup_common_logger, setup_logger
-from sv.backend.service.app_state import get_app_state_manager, AppState
+from sv.backend.service.app_state_manager import get_app_state_manager, AppState
 from sv.daemon.module.recovery_check import RecoveryCheckService
-from sv.backend.f_line_server import initialize_web_app
+from sv.backend.f_line_webserver import initialize_web_app
 from sv.task.tasks import (
     VideoProcessingTask,
     AnalysisTask,
@@ -92,7 +92,7 @@ class FLineDaemon:
         
         # ==================== RecoveryCheckService 통합 ====================
         self.recovery_service = RecoveryCheckService()
-        self.app_state = get_app_state_manager()
+        self.app_state_manager = get_app_state_manager()
         
         # 초기화 작업 등록
         self._setup_recovery_tasks()
@@ -121,7 +121,7 @@ class FLineDaemon:
             """애플리케이션 상태 초기화"""
             logger.info("🔄 Initializing application state...")
             await asyncio.sleep(0.1)
-            await self.app_state.set_state(AppState.INITIALIZING)
+            await self.app_state_manager.set_state(AppState.INITIALIZING)
             logger.info("✓ State initialization complete")
             return True
         
@@ -234,12 +234,12 @@ class FLineDaemon:
         success = await self.recovery_service.run_all()
         
         if success:
-            await self.app_state.set_state(AppState.READY)
+            await self.app_state_manager.set_state(AppState.READY)
             logger.info("=" * 80)
             logger.info("✅ Daemon is READY!")
             logger.info("=" * 80)
         else:
-            await self.app_state.set_state(AppState.SHUTDOWN)
+            await self.app_state_manager.set_state(AppState.SHUTDOWN)
             logger.error("=" * 80)
             logger.error("❌ Daemon Initialization FAILED!")
             logger.error("=" * 80)

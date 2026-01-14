@@ -19,8 +19,8 @@ class FireLocation(BaseModel):
 
 class VideoInfo(BaseModel):
     """비디오 정보 모델"""
-    path: str
-    name: str
+    video_url: str
+    video_name: str
     add_time: Optional[str] = None
     analysis_status: str
 
@@ -139,8 +139,8 @@ class QueryVideoService:
                             break
 
                 video_info = {
-                    "path": video_path or "",
-                    "name": video_name,
+                    "video_url": video_path or "",
+                    "video_name": video_name,
                     "add_time": video_add_time,
                     "analysis_status": status,
                 }

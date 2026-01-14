@@ -1,23 +1,16 @@
-"""
-애플리케이션 초기화 상태 관리
-
-서버 시작 시 daemon 실행과 recovery check 완료 여부를 추적합니다.
-"""
-
 import asyncio
-from enum import Enum
 from typing import Optional
+from enum import Enum
+
 from sv.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
-
 
 class AppState(Enum):
     """애플리케이션 상태"""
     INITIALIZING = "initializing"      # 초기화 중
     READY = "ready"                    # 준비 완료
     SHUTDOWN = "shutdown"              # 종료
-
 
 class AppStateManager:
     """애플리케이션 상태 관리자"""

@@ -6,7 +6,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from server.routers import sender, video_status, analyzed_data
-app = FastAPI(title="Server mocking backend for testing data-interchange between AI and Backend Layer")
+app = FastAPI(title="Mocking backend server for testing data-interchange between ai and backend Layer")
 
 # ==================== API Endpoints ====================
 app.include_router(sender.router)

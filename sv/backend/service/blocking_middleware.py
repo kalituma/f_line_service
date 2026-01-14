@@ -1,13 +1,7 @@
-"""
-요청 블로킹 미들웨어
-
-서버 초기화가 완료될 때까지 모든 요청을 블로킹합니다.
-"""
-
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from sv.backend.service.app_state import get_app_state_manager, AppState
+from sv.backend.service.app_state_manager import get_app_state_manager, AppState
 from sv.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -33,11 +27,10 @@ class InitializationBlockerMiddleware(BaseHTTPMiddleware):
         """
         app_state = get_app_state_manager()
         
-        # Health check는 항상 통과 (초기화 상태 확인용)
+        # Health check는 항상 통과
         if request.url.path == "/health":
             return await call_next(request)
         
-        # 초기화 중이면 요청 블로킹
         if app_state.get_state() != AppState.READY:
             logger.warning(
                 f"Request blocked during initialization: {request.method} {request.url.path}"

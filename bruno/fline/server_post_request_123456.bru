@@ -1,0 +1,23 @@
+meta {
+  name: server_post_request_123456
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://127.0.0.1:8086/wildfire-data-sender/api/wildfire/sender
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "frfr_info_id": "123456",
+    "analysis_id": "20251222_1706_VIDEO_003"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

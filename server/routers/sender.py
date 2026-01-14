@@ -2,12 +2,11 @@ import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from server.response_obj import (
-    WildfireVideoRequest, 
-    WildfireResponse,
+    WildfireVideoRequest,
     WildfireInfoListResponse,
     WildfireInfoPair,
 )
-from server.backend.service.query_video_service import QueryVideoService
+from server.backend.service.query_video_service import QueryVideoService, QueryVideoResponse
 from server.backend.service.fire_info_service import FireInfoService
 from server.backend.service.analysis_status_service import AnalysisStatusService
 
@@ -96,14 +95,14 @@ async def get_wildfire_info_list() -> WildfireInfoListResponse:
 
 @router.post(
     "/sender",
-    response_model=WildfireResponse,
+    response_model=QueryVideoResponse,
     responses={
         400: {"description": "잘못된 요청 형식"},
         404: {"description": "산불 또는 분석 데이터를 찾을 수 없음"},
         500: {"description": "서버 내부 오류"},
     }
 )
-async def get_wildfire_video(video_request: WildfireVideoRequest) -> WildfireResponse:
+async def get_wildfire_video(video_request: WildfireVideoRequest) -> QueryVideoResponse:
     """
     저장된 산불 정보 및 비디오 정보를 조회합니다.
 

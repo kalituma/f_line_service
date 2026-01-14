@@ -1,22 +1,6 @@
 from pydantic import BaseModel, field_validator
 from typing import List, Optional
 
-class VideoInfo(BaseModel):
-    path: str
-    name: str
-    add_time: str
-    analysis_status: str
-
-class FireLocation(BaseModel):
-    longitude: float
-    latitude: float
-
-class WildfireResponse(BaseModel):
-    frfr_info_id: str
-    analysis_id: str
-    fire_location: FireLocation
-    videos: List[VideoInfo]
-
 class WildfireVideoRequest(BaseModel):
     frfr_info_id: str
     analysis_id: str

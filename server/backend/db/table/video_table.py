@@ -4,6 +4,7 @@ from tinydb import Query
 from typing import Optional, List, Dict, Any
 
 from server.backend.db.database import get_shared_database, SharedDatabase
+from server.utils.result_handling import result_without_id
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ class WildfireVideoTable:
         logger.info(
             f"Retrieved {len(results)} wildfire_video records for {frfr_info_id}"
         )
-        return results
+        return result_without_id(results)
 
     def get_by_frfr_id_and_analysis_id(
         self, frfr_info_id: str, analysis_id: str

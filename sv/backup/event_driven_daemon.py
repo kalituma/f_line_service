@@ -13,15 +13,15 @@ from fastapi import FastAPI  # type: ignore
 
 
 from sv import LOG_DIR_PATH
-from sv.backend.service.job_queue_service import JobQueueService
+
 from sv.daemon.module.db_change_listener import DBChangeListener, DBChangeEvent, ChangeEventType
 from sv.daemon.module.split_executor import FlineTaskSplitExecutor
+from sv.backend.service.service_manager import get_service_manager
 from sv.task.task_base import TaskBase
-from sv.backend.db.job_queue_db import JobStatus
+from sv.backend.work_status import WorkStatus
 from sv.utils.logger import setup_common_logger, setup_logger
 
 logger = setup_logger(__name__)
-logging = logging_module
 
 class FlineDaemon:
     """이벤트 기반 하이브리드 Daemon"""
@@ -30,8 +30,6 @@ class FlineDaemon:
         self,
         num_executors: int = 2,
         poll_interval: float = 2.0,
-        fallback_poll_interval: int = 30,
-        enable_fallback_polling: bool = True,
         enable_event_listener: bool = True,
         primary_task: TaskBase = None,
         secondary_tasks: List[TaskBase] = None,
@@ -52,12 +50,9 @@ class FlineDaemon:
         self.db_change_callback = db_change_callback
         self.num_executors = num_executors        
         self.poll_interval = poll_interval
-        self.fallback_poll_interval = fallback_poll_interval
-        self.enable_fallback_polling = enable_fallback_polling
         self.enable_event_listener = enable_event_listener
+        self.job_service = get_service_manager().get_job_queue_service()
 
-        self.job_queue_service = JobQueueService()
-        
         # DB 변경 리스너 초기화
         self.db_listener = DBChangeListener(poll_interval)
         self.db_listener.on_change(self._handle_db_change)
@@ -71,7 +66,6 @@ class FlineDaemon:
         # 제어 플래그
         self.running = False
         self.listener_thread: Optional[Thread] = None
-        self.fallback_poll_thread: Optional[Thread] = None
         self.stop_event = ThreadEvent()
         
         logger.info("=" * 80)
@@ -79,7 +73,6 @@ class FlineDaemon:
         logger.info(f"  Executors: {self.num_executors}")
         logger.info(f"  Poll Interval: {self.poll_interval}s")
         logger.info(f"  Event Listener: {self.enable_event_listener}")
-        logger.info(f"  Fallback Polling: {self.enable_fallback_polling}")
         logger.info("=" * 80)
     
     def add_job(self, frfr_id: str, analysis_id: str) -> Optional[int]:
@@ -94,7 +87,7 @@ class FlineDaemon:
             생성된 job_id 또는 None (중복 또는 에러)
         """
         try:
-            job_id = self.job_queue_service.add_job(frfr_id, analysis_id)
+            job_id = self.job_service.add_job(frfr_id, analysis_id)
             if job_id:
                 logger.info(f"Job added: job_id={job_id}, frfr_id={frfr_id}")
             else:
@@ -116,7 +109,7 @@ class FlineDaemon:
             Job 정보 또는 None
         """
         try:
-            return self.job_queue_service.get_job_status(job_id)
+            return self.job_service.get_job_status(job_id)
         except Exception as e:
             logger.error(f"Error getting job status: {str(e)}")
             return None
@@ -172,7 +165,7 @@ class FlineDaemon:
         """
         try:
             # 처리할 Job이 있는지 확인
-            job_id = self.job_queue_service.get_next_job()
+            job_id = self.job_service.get_next_job()
             
             if not job_id:
                 logger.debug("No pending jobs")
@@ -188,7 +181,7 @@ class FlineDaemon:
                 logger.error("Primary task or secondary tasks not registered")
                 self.job_queue._conn().__enter__().execute(
                     "UPDATE job_queue SET status = ? WHERE job_id = ?",
-                    (JobStatus.FAILED.value, job_id)
+                    (WorkStatus.FAILED.value, job_id)
                 )
                 return
             
@@ -248,7 +241,7 @@ class FlineDaemon:
                 )
         
         # Job 상태 업데이트
-        status = JobStatus.COMPLETED if result['status'] == 'success' else JobStatus.FAILED
+        status = WorkStatus.COMPLETED if result['status'] == 'success' else WorkStatus.FAILED
         
         try:
             with self.job_queue._conn() as conn:
@@ -262,7 +255,7 @@ class FlineDaemon:
     
     def _listener_thread_func(self):
         """DB 변경 감지 리스너 스레드"""
-        logging.info("🎧 DB Change Listener started")  # noqa: F541
+        logger.info("🎧 DB Change Listener started")  # noqa: F541
         
         while not self.stop_event.is_set():
             try:
@@ -270,7 +263,7 @@ class FlineDaemon:
                 self.db_listener.check_status_column_change(
                     table_name="job_queue",
                     status_column="status",
-                    target_status=JobStatus.PENDING.value,
+                    target_status=WorkStatus.PENDING.value,
                     id_column="job_id"
                 )
                 
@@ -281,24 +274,7 @@ class FlineDaemon:
                 time.sleep(self.poll_interval)
         
         logger.info("🎧 DB Change Listener stopped")
-    
-    def _fallback_poll_thread_func(self):
-        """폴백 주기적 폴링 스레드"""
-        logging.info("📊 Fallback Polling started")  # noqa: F541
-        
-        while not self.stop_event.is_set():
-            try:
-                logger.debug("Running fallback periodic polling")
-                asyncio.run(self._process_pending_jobs())
-                
-                time.sleep(self.fallback_poll_interval)
-            
-            except Exception as e:
-                logger.error(f"Error in fallback polling: {str(e)}", exc_info=True)  # noqa: F541
-                time.sleep(self.fallback_poll_interval)
-        
-        logger.info("📊 Fallback Polling stopped")
-    
+
     def start(self):
         """Daemon 시작"""
         logger.info("Starting EventDrivenDaemon...")
@@ -318,16 +294,7 @@ class FlineDaemon:
                 name="DBChangeListener"
             )
             self.listener_thread.start()
-        
-        # 폴백 폴링 스레드 시작
-        if self.enable_fallback_polling:
-            self.fallback_poll_thread = Thread(
-                target=self._fallback_poll_thread_func,
-                daemon=True,
-                name="FallbackPoller"
-            )
-            self.fallback_poll_thread.start()
-        
+
         logger.info("✅ EventDrivenDaemon started successfully")
     
     def stop(self):
@@ -340,10 +307,7 @@ class FlineDaemon:
         # 스레드 종료 대기
         if self.listener_thread:
             self.listener_thread.join(timeout=5)
-        
-        if self.fallback_poll_thread:
-            self.fallback_poll_thread.join(timeout=5)
-        
+
         logger.info("✅ EventDrivenDaemon stopped")
     
     def get_status(self) -> Dict[str, Any]:
@@ -367,7 +331,6 @@ def initialize_logger(log_dir_path=None):
     setup_common_logger(log_file)
     
     return log_file
-
 
 if __name__ == '__main__':
     # 1. 로거 초기화

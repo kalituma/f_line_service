@@ -13,7 +13,7 @@ FlineDaemon 패키지
 """
 
 from sv.daemon.fline_daemon import FlineDaemon
-from sv.daemon.module.job_manager import JobManager
+from sv.daemon.module.work_manager import WorkManager
 from sv.daemon.module.task_manager import TaskManager
 from sv.daemon.module.event_processor import EventProcessor
 from sv.daemon.module.execution_engine import ExecutionEngine
@@ -21,7 +21,7 @@ from sv.daemon.module.thread_manager import ThreadManager
 
 __all__ = [
     'FlineDaemon',
-    'JobManager',
+    'WorkManager',
     'TaskManager',
     'EventProcessor',
     'ExecutionEngine',

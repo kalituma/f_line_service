@@ -2,16 +2,16 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from sv.utils.logger import setup_logger
 from sv.routers import job_queue
-from sv.backend.service.app_state import get_app_state_manager
+from sv.backend.service.app_state_manager import get_app_state_manager
 from sv.backend.service.blocking_middleware import InitializationBlockerMiddleware
 from sv.backup.initialize_and_recovery import lifespan
 
 if TYPE_CHECKING:
-    from sv.daemon.fline_daemon import FLineDaemon
+    from sv.daemon.fline_daemon import FlineDaemon
 
 logger = setup_logger(__name__)
 
-def initialize_web_app(daemon: "FLineDaemon") -> FastAPI:
+def initialize_web_app(daemon: "FlineDaemon") -> FastAPI:
     """
     FastAPI 앱 초기화 및 설정
     

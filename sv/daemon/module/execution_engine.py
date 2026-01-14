@@ -1,37 +1,56 @@
-"""
-Task 실행 엔진 담당 클래스
-Ray Actor를 통한 Task 실행 및 결과 처리
-"""
-
-from typing import Dict, Any
+from typing import Dict, Any, Callable, Optional, Tuple, List
 from datetime import datetime
+from threading import Lock
+import os
 
 try:
     import ray  # type: ignore
 except ImportError:
     ray = None  # type: ignore
 
+
+from sv.daemon.daemon_state import JobExecutionStatus
 from sv.daemon.module.split_executor import FlineTaskSplitExecutor
+from sv.backend.service.service_manager import get_service_manager
+from sv.backend.work_status import WorkStatus
 from sv.task.task_base import TaskBase
 from sv.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
 class ExecutionEngine:
-    """Task 실행 및 결과 처리"""
+    """Task 실행 및 결과 처리 (스레드 관리는 ThreadManager가 담당)"""
     
-    def __init__(self, num_executors: int = 2):
+    def __init__(self, base_work_dir: str, update_url: str, num_executors: int = 2):
         """
         Args:
             num_executors: Ray Actor 개수
+            base_work_dir: 작업 기본 디렉토리 경로
         """
         self.num_executors = num_executors
+        self.base_work_dir = base_work_dir
+        self.work_queue_service = get_service_manager().get_work_queue_service()
+
+        # base_work_dir이 없으면 생성
+        try:
+            os.makedirs(base_work_dir, exist_ok=True)
+            logger.info(f"✓ Base work directory created/exists: {base_work_dir}")
+        except Exception as e:
+            logger.error(f"❌ Failed to create base work directory: {str(e)}", exc_info=True)
+            raise
+        
         self.executor_actors = [
-            FlineTaskSplitExecutor.remote(i) for i in range(num_executors)
+            FlineTaskSplitExecutor.remote(i, base_work_dir, update_url) for i in range(num_executors)
         ]
         self.current_executor_idx = 0
+        
+        # 비동기 작업 관리 (ray.wait() 기반)
+        self.pending_works: Dict[int, ray.ObjectRef] = {}  # work_id -> ObjectRef
+        self.work_callbacks: Dict[int, Callable] = {}  # work_id -> callback
+        self.lock = Lock()
+        
         logger.info(f"✓ ExecutionEngine initialized with {num_executors} executors")
-    
+
     def _get_next_executor(self):
         """
         라운드 로빈 방식으로 다음 Executor 반환
@@ -43,85 +62,241 @@ class ExecutionEngine:
         self.current_executor_idx = (self.current_executor_idx + 1) % len(self.executor_actors)
         return executor
     
-    async def execute_job(
-        self,
-        job_id: int,
-        primary_task: TaskBase,
-        secondary_tasks: list,
-        data_splitter
-    ) -> Dict[str, Any]:
+    # ==================== Work 상태 관리 메서드 ====================
+    
+    def _update_work_status_safe(self, work_id: int, status: WorkStatus, log_prefix: str = "") -> bool:
         """
-        Job 실행
+        Work 상태를 안전하게 업데이트 (에러 핸들링 포함)
         
         Args:
-            job_id: Job ID
+            work_id: Work ID
+            status: 변경할 상태
+            log_prefix: 로그 메시지 앞에 붙일 접두사
+            
+        Returns:
+            성공 여부
+        """
+        try:
+            self.work_queue_service.update_work_status(work_id, status)
+            logger.info(f"{log_prefix}✓ Work {work_id} status updated to {status}")
+            return True
+        except Exception as e:
+            logger.error(f"{log_prefix}❌ Failed to update work {work_id} status to {status}: {str(e)}", exc_info=True)
+            return False
+    
+    def _on_execution_start(self, work_id: int) -> bool:
+        """
+        Work 시작 시 상태 업데이트
+        
+        Args:
+            work_id: Work ID
+            
+        Returns:
+            성공 여부
+        """
+        return self._update_work_status_safe(work_id, WorkStatus.PROCESSING, "🚀 ")
+    
+    def _on_execution_complete(self, work_id: int, result: Dict[str, Any]) -> None:
+        """
+        Work 완료 시 상태 업데이트
+        
+        Args:
+            work_id: Work ID
+            result: Work 실행 결과
+        """
+        status = result.get('status', 'failed')
+        work_status = WorkStatus.COMPLETED if status == 'success' else WorkStatus.FAILED
+        self._update_work_status_safe(work_id, work_status, "🏁 ")
+    
+    def execute_work(
+        self,
+        work_info: Dict[str, Any],
+        primary_task: TaskBase,
+        secondary_tasks: list,
+        data_splitter,
+        on_work_complete: Optional[Callable[[int, Dict[str, Any]], None]] = None
+    ) -> None:
+        """
+        Work 실행 (비동기 콜백 방식)
+        
+        Args:
+            work_info: Work       정보 딕셔너리
             primary_task: Primary Task
             secondary_tasks: Secondary Tasks 리스트
             data_splitter: 데이터 분할 함수
-            
-        Returns:
-            실행 결과
+            on_work_complete: 완료 시 호출될 콜백 함수 (work_id, result)
         """
+        work_id = work_info['work_id']
+        
+        # Work 시작 - 상태를 PROCESSING으로 업데이트
+        if not self._on_execution_start(work_id):
+            logger.error("❌ Failed to update work status to PROCESSING")
+            return
+
         try:
             if not primary_task or not secondary_tasks:
                 logger.error("❌ Primary task or secondary tasks not registered")
-                return {
-                    'job_id': job_id,
-                    'status': 'failed',
+                error_result = {
+                    **work_info,
+                    'status': JobExecutionStatus.FAILED.to_str(),
                     'error': 'Tasks not registered'
                 }
+                if on_work_complete:
+                    on_work_complete(work_id, error_result)
+                return
             
             logger.info("=" * 80)
-            logger.info(f"🔄 Processing job: {job_id}")
+            logger.info(f"🔄 Submitting work: {work_id}")
             logger.info("=" * 80)
             
-            # 실행 컨텍스트 생성
+            # 실행 컨텍스트 생성            
             loop_context = {
-                'job_id': job_id,
-                'start_time': datetime.now().isoformat(),
+                **work_info,
+                'start_time': datetime.now().strftime('%Y%m%dT%H%M%S'),
                 'task_count': len(secondary_tasks)
             }
             
             executor = self._get_next_executor()
             
-            logger.info(f"Submitting job {job_id} to executor with data splitting")
-            
-            # Ray Actor에서 데이터 분할 방식 실행
+            logger.info(f"Submitting work {work_id} to executor with data splitting")
+
             result_ref = executor.execute_with_data_splitting.remote(
                 primary_task,
                 secondary_tasks,
                 loop_context,
                 data_splitter or (lambda x: [x]),
-                continue_on_error=True
+                continue_on_error=True,
             )
             
-            # 결과 대기
-            result = ray.get(result_ref)
+            # ObjectRef와 콜백을 pending_works에 등록
+            with self.lock:
+                self.pending_works[work_id] = result_ref
+                if on_work_complete:
+                    self.work_callbacks[work_id] = on_work_complete
             
-            logger.info("=" * 80)
-            logger.info(f"✅ Job {job_id} execution completed: {result.get('status')}")
-            logger.info("=" * 80)
+            logger.info(f"✓ Work {work_id} submitted successfully (monitoring by ThreadManager)")
             
-            return result
-        
         except Exception as e:
-            logger.error(f"❌ Error executing job {job_id}: {str(e)}", exc_info=True)
-            return {
-                'job_id': job_id,
-                'status': 'failed',
+            logger.error(f"❌ Error executing work {work_id}: {str(e)}", exc_info=True)
+            error_result = {
+                'work_id': work_id,
+                'status': JobExecutionStatus.FAILED.to_str(),
                 'error': str(e)
             }
+            if on_work_complete:
+                on_work_complete(work_id, error_result)
     
-    def log_execution_result(self, job_id: int, result: Dict[str, Any]) -> None:
+    # ==================== 모니터링 인터페이스 (ThreadManager가 호출) ====================
+    
+    def get_pending_works_snapshot(self) -> Dict[int, ray.ObjectRef]:
+        """
+        현재 pending works의 스냅샷 반환 (ThreadManager의 모니터 스레드에서 사용)
+        
+        Returns:
+            {work_id: ObjectRef} 딕셔너리
+        """
+        with self.lock:
+            return dict(self.pending_works)
+    
+    def check_and_process_completed_works(self, timeout: float = 1.0) -> List[Tuple[int, Dict[str, Any]]]:
+        """
+        완료된 작업을 확인하고 처리 (ThreadManager의 모니터 스레드에서 호출)
+        
+        Args:
+            timeout: ray.wait() 타임아웃 (초)
+            
+        Returns:
+            완료된 작업 리스트 [(work_id, result), ...]
+        """
+        with self.lock:
+            if not self.pending_works:
+                return []
+            
+            work_refs_map = dict(self.pending_works)
+        
+        if not work_refs_map:
+            return []
+        
+        completed_works = []
+        
+        try:
+            # ray.wait()로 완료된 작업 확인
+            object_refs = list(work_refs_map.values())
+            ready_refs, _ = ray.wait(
+                object_refs,
+                num_returns=len(object_refs),
+                timeout=timeout
+            )
+            
+            # ready된 작업들 처리
+            for ready_ref in ready_refs:
+                # ObjectRef에 해당하는 work_id 찾기
+                completed_work_id = None
+                for wid, ref in work_refs_map.items():
+                    if ref == ready_ref:
+                        completed_work_id = wid
+                        break
+                
+                if completed_work_id is None:
+                    continue
+                
+                try:
+                    # 결과 가져오기
+                    result = ray.get(ready_ref)
+                    
+                    logger.info("=" * 80)
+                    logger.info(f"✅ Work {completed_work_id} execution completed: {result.get('status')}")
+                    logger.info("=" * 80)
+
+                    # Work 완료 - 상태를 COMPLETED/FAILED로 업데이트
+                    self._on_execution_complete(completed_work_id, result)
+
+                    # 콜백 호출
+                    with self.lock:
+                        callback = self.work_callbacks.get(completed_work_id)
+                    
+                    if callback:
+                        callback(completed_work_id, result)
+                    
+                    completed_works.append((completed_work_id, result))
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error processing work {completed_work_id}: {str(e)}", exc_info=True)
+                    error_result = {
+                        'work_id': completed_work_id,
+                        'status': JobExecutionStatus.FAILED.to_str(),
+                        'error': str(e)
+                    }
+                    
+                    with self.lock:
+                        callback = self.work_callbacks.get(completed_work_id)
+                    
+                    if callback:
+                        callback(completed_work_id, error_result)
+                    
+                    completed_works.append((completed_work_id, error_result))
+                
+                finally:
+                    # pending_works에서 제거
+                    with self.lock:
+                        self.pending_works.pop(completed_work_id, None)
+                        self.work_callbacks.pop(completed_work_id, None)
+            
+        except Exception as e:
+            logger.error(f"Error checking completed works: {str(e)}", exc_info=True)
+        
+        return completed_works
+    
+    def log_execution_result(self, work_id: int, result: Dict[str, Any]) -> None:
         """
         실행 결과 로깅
         
         Args:
-            job_id: Job ID
+            work_id: Work ID
             result: 실행 결과
         """
         logger.info("📊 Execution Result:")
-        logger.info(f"  Job ID: {job_id}")
+        logger.info(f"  Work ID: {work_id}")
         logger.info(f"  Status: {result.get('status')}")
         logger.info(f"  Duration: {result.get('total_duration', 0):.2f}s")
         logger.info(f"  Data items: {len(result.get('data_items', []))}")
@@ -149,8 +324,12 @@ class ExecutionEngine:
         Returns:
             Executor 상태 정보
         """
+        with self.lock:
+            pending_count = len(self.pending_works)
+        
         return {
             'num_executors': self.num_executors,
-            'current_executor_idx': self.current_executor_idx
+            'current_executor_idx': self.current_executor_idx,
+            'pending_works_count': pending_count
         }
 

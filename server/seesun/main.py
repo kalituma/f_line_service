@@ -6,7 +6,7 @@ from dispatcher import AnalysisDispatcher
 
 def main():
     """디스패처를 생성하고 무한 루프로 실행한다."""
-    dispatcher = AnalysisDispatcher()
+    dispatcher = AnalysisDispatcher(run_once=True)
     dispatcher.run_forever()
 
 

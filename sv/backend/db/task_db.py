@@ -2,21 +2,11 @@ from typing import Optional, List
 import sqlite3
 from enum import Enum
 
+from sv.backend.work_status import WorkStatus
 from sv.utils.logger import setup_logger
 from sv.backend.db.base_db import BaseDB
 
 logger = setup_logger(__name__)
-
-class TaskStatus(Enum):
-    """작업 상태 Enum"""
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    
-    def __str__(self):
-        return self.value
 
 class TaskQueue(BaseDB):
     """Task 관리 클래스"""
@@ -54,7 +44,7 @@ class TaskQueue(BaseDB):
                 try:
                     conn.execute(
                         'INSERT INTO tasks (job_id, workspace, status, updated_at) VALUES (?, ?, ?, ?)',
-                        (job_id, task_name, TaskStatus.PENDING.value, time.time())
+                        (job_id, task_name, WorkStatus.PENDING.value, time.time())
                     )
                 except sqlite3.IntegrityError as e:
                     if "UNIQUE constraint failed" in str(e):
@@ -188,4 +178,43 @@ class TaskQueue(BaseDB):
         except Exception as e:
             logger.error(f"Error counting job tasks: {str(e)}")
             return 0
+    
+    def insert_tasks(self, job_id: int, tasks_with_workspace: List[tuple]) -> Optional[List[int]]:
+        """
+        작업 정보를 일괄 저장합니다.
+        
+        Args:
+            job_id: 작업 ID
+            tasks_with_workspace: (seq, task_name, workspace) 튜플의 리스트
+            
+        Returns:
+            생성된 task_id 리스트 (실패 시 None)
+        """
+        import time
+        task_ids = []
+        
+        try:
+            with self._conn() as conn:
+                for seq, task_name, workspace in tasks_with_workspace:
+                    try:
+                        cursor = conn.execute(
+                            'INSERT INTO tasks (job_id, workspace, seq, status, updated_at) VALUES (?, ?, ?, ?, ?)',
+                            (job_id, workspace, seq, WorkStatus.PENDING.value, time.time())
+                        )
+                        # 생성된 task_id 저장
+                        task_ids.append(cursor.lastrowid)
+                        
+                    except sqlite3.IntegrityError as e:
+                        if "UNIQUE constraint failed" in str(e):
+                            logger.warning(f"Duplicate task: job_id={job_id}, seq={seq}, task_name={task_name} (already exists)")
+                        else:
+                            logger.error(f"Failed to add task: {job_id}/{task_name} - {str(e)}")
+                        return None
+                
+                logger.info(f"Tasks inserted successfully: job_id={job_id}, count={len(tasks_with_workspace)}, task_ids={task_ids}")
+                return task_ids
+                
+        except Exception as e:
+            logger.error(f"Error inserting tasks: {str(e)}")
+            return None
 
