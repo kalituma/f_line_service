@@ -1,5 +1,5 @@
 from sv.backend.service.service_manager import get_service_manager
-from sv.backend.job_status import JobStatus
+from sv.backend.work_status import WorkStatus
 from sv.utils.logger import setup_logger, setup_common_logger
 
 logger = setup_logger(__name__)
@@ -32,7 +32,8 @@ def reset_processing_jobs_to_pending() -> int:
         logger.info("Processing 상태인 Jobs 조회 중...")
         logger.info("="*80)
         
-        processing_jobs = job_queue_service.get_jobs_by_status(JobStatus.PROCESSING)
+        processing_jobs = job_queue_service.get_jobs_by_status(WorkStatus.PROCESSING)
+        processing_jobs+=job_queue_service.get_jobs_by_status(WorkStatus.COMPLETED)
         
         if not processing_jobs:
             logger.info("✓ Processing 상태인 Job이 없습니다")
@@ -54,7 +55,7 @@ def reset_processing_jobs_to_pending() -> int:
             
             try:
                 # 상태를 'pending'으로 변경
-                success = job_queue_service.update_job_status(job_id, JobStatus.PENDING)
+                success = job_queue_service.update_job_status(job_id, WorkStatus.PENDING)
                 
                 if success:
                     logger.info(f"✓ Job {job_id} (frfr_id={frfr_id}, analysis_id={analysis_id}) "

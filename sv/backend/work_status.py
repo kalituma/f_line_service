@@ -1,6 +1,6 @@
 from enum import Enum
 
-class JobStatus(Enum):
+class WorkStatus(Enum):
     """작업 상태 Enum"""
     PENDING = "pending"
     PROCESSING = "processing"

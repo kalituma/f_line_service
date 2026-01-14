@@ -25,7 +25,8 @@ class TaskBase:
         self.logger = logging.getLogger(f"Task-{task_name}")
         self.delay_seconds = delay_seconds
         self.raise_exception = raise_exception
-
+        self.job_queue_service = None
+        
     def before_execute(self, context: Dict[str, Any]) -> None:
         """작업 실행 전 호출되는 hook
         
@@ -69,11 +70,36 @@ class TaskBase:
         """
         pass
 
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _update_task_status(self, task_id: int, status: str) -> bool:
+        """Task 상태를 업데이트합니다.
+        
+        Args:
+            task_id: 업데이트할 task ID
+            status: 변경할 상태 (e.g., 'processing', 'completed', 'failed')
+            
+        Returns:
+            성공 여부
+        """
+        if task_id is None or self.job_queue_service is None:
+            return False
+        
+        try:
+            result = self.job_queue_service.update_task_status(task_id, status)
+            if result:
+                self.logger.info(f"Task status updated: task_id={task_id}, status={status}")
+            else:
+                self.logger.warning(f"Failed to update task status: task_id={task_id}, status={status}")
+            return result
+        except Exception as e:
+            self.logger.error(f"Error updating task status: {str(e)}", exc_info=True)
+            return False
+
+    def execute(self, context: Dict[str, Any], task_id: Optional[int] = None) -> Dict[str, Any]:
         """작업 실행의 전체 흐름을 관리 (Template Method)
 
         Args:
             context: 이전 작업들의 결과를 담은 컨텍스트
+            task_id: 작업 ID (DB 상태 업데이트용)
 
         Returns:
             작업 결과 딕셔너리
@@ -84,6 +110,10 @@ class TaskBase:
                 self.logger.info(f"⏳ Delaying task execution for {self.delay_seconds} seconds...")
                 time.sleep(self.delay_seconds)
                 self.logger.info(f"✓ Delay completed")
+            
+            # 0-1. Task 상태를 'processing'으로 업데이트
+            if task_id is not None:
+                self._update_task_status(task_id, 'processing')
             
             # 1. 실행 전 hook
             self.before_execute(context)
@@ -99,9 +129,18 @@ class TaskBase:
             # 4. 실행 후 hook
             self.after_execute(context, result)
             
+            # 4-1. Task 상태를 'completed'로 업데이트
+            if task_id is not None:
+                self._update_task_status(task_id, 'completed')
+            
             return result
             
         except Exception as e:
             # 5. 에러 발생 시 hook
             self.on_error(context, e)
+            
+            # 5-1. Task 상태를 'failed'로 업데이트
+            if task_id is not None:
+                self._update_task_status(task_id, 'failed')
+            
             raise

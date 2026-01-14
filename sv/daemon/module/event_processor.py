@@ -10,7 +10,7 @@ class EventProcessor:
     def __init__(
         self,
         poll_interval: float = 2.0,
-        on_job_created: Optional[Callable] = None
+        on_work_created: Optional[Callable] = None
     ):
         """
         Args:
@@ -19,7 +19,7 @@ class EventProcessor:
         """
         self.db_listener = DBChangeListener(poll_interval)
         self.db_listener.on_change(self._handle_db_change)
-        self.on_job_created = on_job_created
+        self.on_work_created = on_work_created
     
     def _handle_db_change(self, event: DBChangeEvent) -> None:
         """
@@ -30,22 +30,22 @@ class EventProcessor:
         """
         logger.info(f"DB Change detected: {event}")
 
-        # Job Queue INSERT 이벤트 처리
-        if event.table_name == "job_queue" and event.event_type == ChangeEventType.PENDING_JOBS_DETECTED:
-            logger.info(f"✓ New job detected: {event.data}")
-            if self.on_job_created:
+        # Work Queue INSERT 이벤트 처리
+        if event.table_name == "work_queue" and event.event_type == ChangeEventType.PENDING_WORKS_DETECTED:
+            logger.info(f"✓ New work detected: {event.data}")
+            if self.on_work_created:
                 try:
                     # 단순히 콜백 호출 (Ray가 알아서 비동기 처리)
-                    self.on_job_created()
+                    self.on_work_created()
                 except Exception as e:
-                    logger.error(f"Error in on_job_created callback: {str(e)}", exc_info=True)
+                    logger.error(f"Error in on_work_created callback: {str(e)}", exc_info=True)
     
     def check_changes(self) -> None:
         """
-        Pending 상태의 Job 개수 확인                    
+        Pending 상태의 Work 개수 확인
         """
         try:
-            self.db_listener.check_pending_jobs()
+            self.db_listener.check_pending_works()
         except Exception as e:
-            logger.error(f"Error checking pending jobs: {str(e)}")
+            logger.error(f"Error checking pending works: {str(e)}")
 

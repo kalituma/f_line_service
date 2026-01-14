@@ -18,7 +18,7 @@ from sv.daemon.module.db_change_listener import DBChangeListener, DBChangeEvent,
 from sv.daemon.module.split_executor import FlineTaskSplitExecutor
 from sv.backend.service.service_manager import get_service_manager
 from sv.task.task_base import TaskBase
-from sv.backend.job_status import JobStatus
+from sv.backend.work_status import WorkStatus
 from sv.utils.logger import setup_common_logger, setup_logger
 
 logger = setup_logger(__name__)
@@ -181,7 +181,7 @@ class FlineDaemon:
                 logger.error("Primary task or secondary tasks not registered")
                 self.job_queue._conn().__enter__().execute(
                     "UPDATE job_queue SET status = ? WHERE job_id = ?",
-                    (JobStatus.FAILED.value, job_id)
+                    (WorkStatus.FAILED.value, job_id)
                 )
                 return
             
@@ -241,7 +241,7 @@ class FlineDaemon:
                 )
         
         # Job 상태 업데이트
-        status = JobStatus.COMPLETED if result['status'] == 'success' else JobStatus.FAILED
+        status = WorkStatus.COMPLETED if result['status'] == 'success' else WorkStatus.FAILED
         
         try:
             with self.job_queue._conn() as conn:
@@ -263,7 +263,7 @@ class FlineDaemon:
                 self.db_listener.check_status_column_change(
                     table_name="job_queue",
                     status_column="status",
-                    target_status=JobStatus.PENDING.value,
+                    target_status=WorkStatus.PENDING.value,
                     id_column="job_id"
                 )
                 

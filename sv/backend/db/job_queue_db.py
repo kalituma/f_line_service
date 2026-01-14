@@ -3,7 +3,7 @@ import sqlite3
 
 from sv.utils.logger import setup_logger
 from sv.backend.db.base_db import BaseDB
-from sv.backend.job_status import JobStatus
+from sv.backend.work_status import WorkStatus
 
 logger = setup_logger(__name__)
 
@@ -24,27 +24,33 @@ class JobQueue(BaseDB):
             conn.executescript('''
                 CREATE TABLE IF NOT EXISTS job_queue (
                     job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    work_id INTEGER NOT NULL,
                     frfr_id TEXT NOT NULL,
                     analysis_id TEXT NOT NULL,
                     status TEXT DEFAULT 'pending',
+                    video_url TEXT NOT NULL,
                     created_at REAL,
                     updated_at REAL,
-                    UNIQUE(frfr_id, analysis_id)
+                    UNIQUE(frfr_id, analysis_id),
+                    FOREIGN KEY (work_id) REFERENCES work_queue(work_id)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_job_status ON job_queue(status, created_at);
+                CREATE INDEX IF NOT EXISTS idx_job_work_id ON job_queue(work_id);
             ''')
 
         logger.info(f"Table '{table_name}' initialized successfully")
         
-    def add_job(self, frfr_id: str, analysis_id: str, status: JobStatus = JobStatus.PENDING) -> Optional[int]:
+    def add_job(self, work_id: int, frfr_id: str, analysis_id: str, video_url: str, status: WorkStatus = WorkStatus.PENDING) -> Optional[int]:
         """
         작업을 큐에 추가합니다.
         중복된 frfr_id와 analysis_id 조합은 추가되지 않습니다.
         
         Args:
+            work_id: Work Queue ID
             frfr_id: 산불 정보 ID
             analysis_id: 분석 ID
+            video_url: 비디오 URL
             status: 초기 작업 상태 (기본값: PENDING)
             
         Returns:
@@ -54,15 +60,15 @@ class JobQueue(BaseDB):
         now = time.time()
         
         # enum 값을 문자열로 변환
-        status_value = status.value if isinstance(status, JobStatus) else status
+        status_value = status.value if isinstance(status, WorkStatus) else status
         
         with self._conn() as conn:
             try:
                 cursor = conn.execute(
-                    'INSERT INTO job_queue (frfr_id, analysis_id, status, created_at) VALUES (?, ?, ?, ?)',
-                    (frfr_id, analysis_id, status_value, now)
+                    'INSERT INTO job_queue (work_id, frfr_id, analysis_id, video_url, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                    (work_id, frfr_id, analysis_id, video_url, status_value, now)
                 )
-                logger.info(f"Job added: frfr_id={frfr_id}, analysis_id={analysis_id}, status={status_value}")
+                logger.info(f"Job added: work_id={work_id}, frfr_id={frfr_id}, analysis_id={analysis_id}, status={status_value}")
                 return cursor.lastrowid
             except sqlite3.IntegrityError as e:
                 if "UNIQUE constraint failed" in str(e):
@@ -79,18 +85,19 @@ class JobQueue(BaseDB):
         FIFO로 다음 pending job 가져와서 processing으로 변경
         
         Returns:
-            {'job_id': int, 'frfr_id': str} 또는 None
+            {'job_id': int, 'work_id': int, 'frfr_id': str, 'analysis_id': str} 또는 None
         """
         import time
         with self._conn() as conn:
             row = conn.execute(
-                'SELECT job_id, frfr_id, analysis_id FROM job_queue WHERE status = ? ORDER BY created_at ASC LIMIT 1',
-                (JobStatus.PENDING.value,)
+                'SELECT job_id, work_id, frfr_id, analysis_id FROM job_queue WHERE status = ? ORDER BY created_at ASC LIMIT 1',
+                (WorkStatus.PENDING.value,)
             ).fetchone()
             
             if row:
                 return {
                     'job_id': row['job_id'],
+                    'work_id': row['work_id'],
                     'frfr_id': row['frfr_id'],
                     'analysis_id': row['analysis_id']
                 }
@@ -138,10 +145,10 @@ class JobQueue(BaseDB):
         try:
             with self._conn() as conn:
                 conn.execute(
-                    'UPDATE job_queue SET status = ?, created_at = ? WHERE job_id = ?',
+                    'UPDATE job_queue SET status = ?, updated_at = ? WHERE job_id = ?',
                     (status, time.time(), job_id)
                 )
-            logger.info(f"Job status updated: job_id={job_id}, status={status}")
+            logger.info(f"Job status updated: job_id={job_id}, status={status} at {time.time()}")
             return True
         except Exception as e:
             logger.error(f"Error updating job status: {str(e)}")

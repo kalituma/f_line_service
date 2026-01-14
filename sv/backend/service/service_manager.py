@@ -4,6 +4,7 @@
 from typing import Optional, Dict, Any
 
 from sv.backend.service.job_queue_service import JobQueueService
+from sv.backend.service.work_queue_service import WorkQueueService
 from sv.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -43,8 +44,9 @@ class ServiceManager:
             self._services['job_queue'] = job_queue_service
             logger.info("✓ JobQueueService initialized and registered")
             
-            # TODO: 여기에 다른 서비스들 추가
-            # 예: self._services['other_service'] = OtherService()
+            work_queue_service = WorkQueueService()
+            self._services['work_queue'] = work_queue_service
+            logger.info("✓ WorkQueueService initialized and registered")
             
             self._initialized = True
             logger.info(f"✅ All services initialized successfully (total: {len(self._services)})")
@@ -68,6 +70,21 @@ class ServiceManager:
             raise RuntimeError("ServiceManager not initialized. Call initialize_all_services() first.")
         
         return self._services.get('job_queue')
+
+    def get_work_queue_service(self) -> WorkQueueService:
+        """
+        JobQueueService 인스턴스를 반환한다.
+
+        Returns:
+            JobQueueService: 등록된 JobQueueService 인스턴스
+
+        Raises:
+            RuntimeError: 서비스가 초기화되지 않은 경우
+        """
+        if not self._initialized:
+            raise RuntimeError("ServiceManager not initialized. Call initialize_all_services() first.")
+
+        return self._services.get('work_queue')
     
     def is_initialized(self) -> bool:
         """

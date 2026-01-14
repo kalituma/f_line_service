@@ -9,7 +9,7 @@ import time
 
 from sv.daemon.module.db_change_listener import DBChangeListener, DBChangeEvent, ChangeEventType
 from sv.daemon.module.execution_engine import ExecutionEngine
-from sv.daemon.module.job_manager import JobManager
+from sv.daemon.module.work_manager import WorkManager
 from sv.daemon.module.task_manager import TaskManager
 from sv.utils.logger import setup_logger, setup_common_logger
 from sv.backend.service.service_manager import get_service_manager
@@ -27,10 +27,8 @@ from sv.test_modules.test_tasks.geojson_boundary_task import SegmentationGeoJson
 
 logger = setup_logger(__name__)
 
-
 def initialize_logger() -> None:
     setup_common_logger(None)
-
 
 service_manager = get_service_manager()
 if not service_manager.is_initialized():
@@ -50,7 +48,7 @@ class EventDrivenLogger:
         self.work_dir = "C:/__workspace/f_line_service/data/workspace"
         self.result_path = "C:/__workspace/f_line_service/data/vid/cy_all.geojson"
 
-        self.job_manager = JobManager()
+        self.work_manager = WorkManager()
         self.task_manager = TaskManager()
 
         self.task_manager.register_primary_task(ConnectionTask(api_url=self.video_request_url))
@@ -84,50 +82,50 @@ class EventDrivenLogger:
         """
         logger.info(f"DB Change detected: {event}")
 
-        # Job Queue INSERT 이벤트 처리
-        if event.table_name == "job_queue" and event.event_type == ChangeEventType.PENDING_JOBS_DETECTED:
-            logger.info(f"✓ New job detected: {event.data}")
-            if self._on_job_created:
+        # Work Queue INSERT 이벤트 처리
+        if event.table_name == "work_queue" and event.event_type == ChangeEventType.PENDING_WORKS_DETECTED:
+            logger.info(f"✓ New work detected: {event.data}")
+            if self._on_work_created:
                 try:
-                    self._on_job_created()
+                    self._on_work_created()
                 except Exception as e:
-                    logger.error(f"Error in on_job_created callback: {str(e)}", exc_info=True)
+                    logger.error(f"Error in on_work_created callback: {str(e)}", exc_info=True)
 
     def check_changes(self) -> None:
         """
-        Pending 상태의 Job 개수 확인                    
+        Pending 상태의 Work 개수 확인
         """
         try:
-            self.db_listener.check_pending_jobs()
+            self.db_listener.check_pending_works()
         except Exception as e:
-            logger.error(f"Error checking pending jobs: {str(e)}")
+            logger.error(f"Error checking pending works: {str(e)}")
 
     #########################################################################################################
 
-    def _on_job_created(self) -> None:
-        """Job 생성 감지 시 핸들러 (Event Processor에서 호출)"""
-        logger.info("Job creation event detected")
-        self._process_pending_jobs()
+    def _on_work_created(self) -> None:
+        """Work 생성 감지 시 핸들러 (Event Processor에서 호출)"""
+        logger.info("Work creation event detected")
+        self._process_pending_work()
 
-    def _on_job_complete(self, job_id: str, result: Dict[str, Any]) -> None:
-        """Job 완료 시 핸들러 (Event Processor에서 호출)"""
-        logger.info(f"Job {job_id} completed")
+    def _on_work_complete(self, work_id: str, result: Dict[str, Any]) -> None:
+        """Work 완료 시 핸들러 (Event Processor에서 호출)"""
+        logger.info(f"Work {work_id} completed")
 
-        # Job 상태에 따라 처리
+        # Work 상태에 따라 처리
         status = result.get('status')
         if status == 'failed':
             error_msg = result.get('error', 'Unknown error')
-            logger.error(f"Job {job_id} failed: {error_msg}")
+            logger.error(f"Work {work_id} failed: {error_msg}")
         else:
-            self._update_video_status(job_id, result)
+            self._update_video_status(work_id, result)
 
-    def _update_video_status(self, job_id: str, result: Dict[str, Any]) -> None:
+    def _update_video_status(self, work_id: str, result: Dict[str, Any]) -> None:
         """
-        Job 상태를 서버에 업데이트
+        Work 상태를 서버에 업데이트
         
         Args:
-            job_id: Job ID
-            result: Job의 결과 정보 (status 포함)
+            work_id: Work ID
+            result: Work의 결과 정보 (status 포함)
         """
         try:
             loop_context = result.get('loop_context')
@@ -135,7 +133,7 @@ class EventDrivenLogger:
             analysis_id = loop_context.get('analysis_id')            
 
             if not frfr_id or not analysis_id:
-                logger.error(f"❌ Missing frfr_id or analysis_id for job {job_id}")
+                logger.error(f"❌ Missing frfr_id or analysis_id for work {work_id}")
                 return
             
             video_updates = []
@@ -159,7 +157,7 @@ class EventDrivenLogger:
                 })
 
             # 상태 업데이트
-            logger.info(f"📤 Sending job status for job {job_id} to server...")
+            logger.info(f"📤 Sending work status for work {work_id} to server...")
 
             send_video_status_update(
                 update_url=self.analysis_update_url,
@@ -168,28 +166,28 @@ class EventDrivenLogger:
                 video_updates=video_updates
             )
 
-            logger.info(f"✅ Job {job_id} status sent to server")
+            logger.info(f"✅ Work {work_id} status sent to server")
 
         except Exception as e:
-            logger.error(f"❌ Error updating job status for {job_id}: {str(e)}", exc_info=True)
+            logger.error(f"❌ Error updating work status for {work_id}: {str(e)}", exc_info=True)
 
-    def _process_pending_jobs(self) -> None:
+    def _process_pending_work(self) -> None:
         """
-        대기 중인 Job 처리 (비동기 콜백 방식)
+        대기 중인 Work 처리 (비동기 콜백 방식)
         
         Flow:
-        1. 다음 PENDING Job 가져오기
+        1. 다음 PENDING Work 가져오기
         2. Task 실행 (논블로킹)
-        3. 완료 시 _on_job_complete 콜백 호출
+        3. 완료 시 _on_work_complete 콜백 호출
         """
-        job_info = self.job_manager.get_next_pending_job()
+        work_info = self.work_manager.get_next_pending_work()
 
-        if not job_info:
-            logger.debug("No pending jobs")
+        if not work_info:
+            logger.debug("No pending works")
             return
 
-        job_id = job_info['job_id']
-        frfr_id = job_info['frfr_id']
+        work_id = work_info['work_id']
+        frfr_id = work_info['frfr_id']
 
         # Task 실행 준비 확인
         if not self.task_manager.are_tasks_ready():
@@ -197,15 +195,15 @@ class EventDrivenLogger:
             return
 
         # Task 실행 (논블로킹 - 콜백 방식)
-        self.execution_engine.execute_job(
-            job_info=job_info,
+        self.execution_engine.execute_work(
+            work_info=work_info,
             primary_task=self.task_manager.primary_task,
             secondary_tasks=self.task_manager.secondary_tasks,
             data_splitter=self.task_manager.data_splitter,
-            on_complete=self._on_job_complete  # 콜백 함수
+            on_work_complete=self._on_work_complete  # 콜백 함수
         )
 
-        logger.info(f"✓ Job {job_id} (frfr_id={frfr_id}) submitted")
+        logger.info(f"✓ Work {work_id} (frfr_id={frfr_id}) submitted")
 
     def _listener_thread_func(self):
         """DB 변경 감지 리스너 스레드"""
@@ -216,7 +214,7 @@ class EventDrivenLogger:
 
         while not self.stop_event.is_set():
             try:
-                # Job Queue 테이블 감시 (PENDING 상태)
+                # Work Queue 테이블 감시 (PENDING 상태)
                 self.check_changes()
 
                 # run_once 모드면 1번만 실행하고 종료
@@ -238,8 +236,8 @@ class EventDrivenLogger:
         logger.info("🎧 DB Change Listener stopped")
 
     def _ray_monitor_thread_func(self) -> None:
-        """Ray Job 모니터 스레드 (ExecutionEngine의 pending jobs 모니터링)"""
-        logger.info("⚡ Ray Job Monitor started")
+        """Ray Work 모니터 스레드 (ExecutionEngine의 pending jobs 모니터링)"""
+        logger.info("⚡ Ray Work Monitor started")
 
         while not self.stop_event.is_set():
             try:
@@ -248,12 +246,12 @@ class EventDrivenLogger:
                     continue
 
                 # ExecutionEngine에서 완료된 작업 확인 및 처리
-                completed_jobs = self.execution_engine.check_and_process_completed_jobs(timeout=1.0)
+                completed_jobs = self.execution_engine.check_and_process_completed_works(timeout=1.0)
 
                 if completed_jobs:
                     logger.debug(f"Processed {len(completed_jobs)} completed jobs")
 
-                pending_snapshot = self.execution_engine.get_pending_jobs_snapshot()
+                pending_snapshot = self.execution_engine.get_pending_works_snapshot()
                 if not pending_snapshot:
                     time.sleep(self.poll_interval)
                 else:
@@ -263,7 +261,7 @@ class EventDrivenLogger:
                 logger.error(f"❌ Error in Ray monitor thread: {str(e)}", exc_info=True)
                 time.sleep(self.poll_interval)
 
-        logger.info("⚡ Ray Job Monitor stopped")
+        logger.info("⚡ Ray Work Monitor stopped")
 
     def start(self):
         """Daemon 시작"""
@@ -289,10 +287,10 @@ class EventDrivenLogger:
         self.monitor_thread = Thread(
             target=self._ray_monitor_thread_func,
             daemon=True,
-            name="RayJobMonitor"
+            name="RayWorkMonitor"
         )
         self.monitor_thread.start()
-        logger.info("✓ Ray Job Monitor thread started")
+        logger.info("✓ Ray Work Monitor thread started")
 
         # run_once 모드면 스레드 완료 대기
         if self.run_once:

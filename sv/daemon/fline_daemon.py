@@ -12,7 +12,7 @@ from sv.utils.logger import setup_common_logger, setup_logger
 from sv.backend.service.app_state_manager import get_app_state_manager, AppState
 from sv.daemon.module.recovery_check import RecoveryCheckService
 
-from sv.daemon.module.job_manager import JobManager
+from sv.daemon.module.work_manager import WorkManager
 from sv.daemon.module.task_manager import TaskManager
 from sv.daemon.module.event_processor import EventProcessor
 from sv.daemon.module.execution_engine import ExecutionEngine
@@ -64,12 +64,12 @@ class FlineDaemon:
         self.app_state = get_app_state_manager()
 
         # ==================== 컴포넌트 초기화 ====================
-        self.job_manager = JobManager()
+        self.job_manager = WorkManager()
         self.task_manager = TaskManager()
 
         self.event_processor = EventProcessor(
             poll_interval=poll_interval,
-            on_job_created=self._on_job_created
+            on_work_created=self._on_job_created
         ) # including listener
 
         # ExecutionEngine 먼저 초기화
@@ -111,11 +111,11 @@ class FlineDaemon:
         Returns:
             생성된 job_id
         """
-        return self.job_manager.add_job(frfr_id, analysis_id)
+        return self.job_manager.add_work(frfr_id, analysis_id)
     
     def get_job_status(self, job_id: int) -> Optional[Dict[str, Any]]:
         """Job 상태 조회"""
-        return self.job_manager.get_job_status(job_id)
+        return self.job_manager.get_work_status(job_id)
     
     # ==================== Task Management API ====================
     
@@ -147,7 +147,7 @@ class FlineDaemon:
         2. Task 실행 (논블로킹)
         3. 완료 시 _on_job_complete 콜백 호출
         """
-        job_info = self.job_manager.get_next_pending_job()
+        job_info = self.job_manager.get_next_pending_work()
         
         if not job_info:
             logger.debug("No pending jobs")
@@ -159,12 +159,12 @@ class FlineDaemon:
             return
         
         # Task 실행 (논블로킹 - 콜백 방식)
-        self.execution_engine.execute_job(
-            job_info=job_info,
+        self.execution_engine.execute_work(
+            work_info=job_info,
             primary_task=self.task_manager.primary_task,
             secondary_tasks=self.task_manager.secondary_tasks,
             data_splitter=self.task_manager.data_splitter,
-            on_complete=self._on_job_complete  # 콜백 함수
+            on_work_complete=self._on_job_complete  # 콜백 함수
         )
         
         logger.info(f"✓ Job {job_info['job_id']} (frfr_id={job_info['frfr_id']}) submitted")
@@ -184,7 +184,7 @@ class FlineDaemon:
         
         # 상태 업데이트
         status = "completed" if result.get('status') == 'success' else "failed"
-        self.job_manager.update_job_status(job_id, status)
+        self.job_manager.update_work_status(job_id, status)
         
         logger.info(f"✅ Job {job_id} status updated to: {status}")
 

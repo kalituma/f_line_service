@@ -5,7 +5,7 @@ import pytest
 import tempfile
 import os
 from sv.backend.db.connection_manager import DBConnectionManager
-from sv.backend.db.job_queue_db import JobQueue, JobStatus
+from sv.backend.db.job_queue_db import JobQueue, WorkStatus
 from sv.backend.db.task_db import TaskQueue
 from sv.backend.service.job_queue_service import JobQueueService
 

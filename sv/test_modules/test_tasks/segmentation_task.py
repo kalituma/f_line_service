@@ -28,9 +28,8 @@ class VideoSegmentationTask(TaskBase):
                 return
 
             # task_name과 start_time으로 작업 폴더명 생성
-            start_time = loop_context.get('start_time', 'unknown')
             task_work_folder_name = f"{self.task_name}"
-            task_work_dir = os.path.join(job_work_dir, start_time, task_work_folder_name)
+            task_work_dir = os.path.join(job_work_dir, task_work_folder_name)
 
             # 작업 폴더 생성
             try:

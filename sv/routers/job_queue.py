@@ -71,6 +71,31 @@ async def get_all_jobs():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/status/tasks", response_model=dict)
+async def get_all_tasks():
+    """
+    모든 작업 태스크 정보를 조회합니다.
+
+    Returns:
+        모든 태스크 정보 (JSON 배열)
+    """
+    try:
+        service = get_service_manager().get_job_queue_service()
+        tasks = service.get_all_tasks()
+
+        logger.info(f"Retrieved {len(tasks)} tasks via API")
+        return {
+            "success": True,
+            "total": len(tasks),
+            "tasks": tasks
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting all tasks: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/status/{job_id}", response_model=dict)
 async def get_job_status(job_id: int):
     """
@@ -97,25 +122,3 @@ async def get_job_status(job_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/status/tasks", response_model=dict)
-async def get_all_tasks():
-    """
-    모든 작업 태스크 정보를 조회합니다.
-    
-    Returns:
-        모든 태스크 정보 (JSON 배열)
-    """
-    try:
-        service = get_service_manager().get_job_queue_service()
-        tasks = service.get_all_tasks()
-        
-        logger.info(f"Retrieved {len(tasks)} tasks via API")
-        return {
-            "success": True,
-            "total": len(tasks),
-            "tasks": tasks
-        }
-    
-    except Exception as e:
-        logger.error(f"Error getting all tasks: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
