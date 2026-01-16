@@ -25,7 +25,7 @@ def add_work(frfr_id: str, analysis_id: str) -> Optional[int]:
             logger.info("ServiceManager 초기화 중...")
             service_manager.initialize_all_services()
 
-        work_id = get_service_manager().get_work_queue_service().add_work(frfr_id, analysis_id)
+        work_id = service_manager.get_work_queue_service().add_work(frfr_id, analysis_id)
         if work_id:
             logger.info(f"Job added: job_id={work_id}, frfr_id={frfr_id}")
         else:

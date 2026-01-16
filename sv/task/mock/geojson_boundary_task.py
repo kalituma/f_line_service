@@ -9,14 +9,23 @@ logger = setup_logger(__name__)
 class SegmentationGeoJsonTask(TaskBase):
     """Homography를 적용하여 Segmentation의 지리적 바운더리를 GeoJSON으로 생성하는 작업"""
 
-    def __init__(self, output_format: str = "geojson", result_path:str = None):
+    def __init__(
+        self, 
+        output_format: str = "geojson", 
+        result_path: str = None,
+        delay_seconds: float = None,
+        raise_exception: Exception = None
+    ):
         """
         Args:
             output_format: 출력 형식 (기본값: geojson)
+            result_path: 결과 경로 (테스팅용)
+            delay_seconds: 작업 실행 시 지연 시간(초). None이면 지연 없음
+            raise_exception: 작업 실행 시 발생시킬 예외. None이면 정상 실행
         """
-        super().__init__("SegmentationGeoJsonTask")
+        super().__init__("SegmentationGeoJsonTask", delay_seconds, raise_exception)
         self.output_format = output_format
-        self.result_path = result_path # used only for mocking version
+        self.result_path = result_path  # used only for mocking version
 
     def _load_integrated_convex_hull(self) -> Dict[str, Any]:
         """result_path에서 통합된 Convex Hull GeoJSON을 로드
@@ -56,8 +65,7 @@ class SegmentationGeoJsonTask(TaskBase):
         """작업 실행 전 준비 작업"""
         try:
             # job_work_dir과 loop_context 가져오기
-            job_work_dir = context.get('job_work_dir')
-            loop_context = context.get('loop_context', {})
+            job_work_dir = context.get('job_dir')
 
             if not job_work_dir:
                 logger.error("❌ job_work_dir이 context에 없습니다")

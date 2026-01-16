@@ -9,13 +9,21 @@ logger = setup_logger(__name__)
 class FeatureMatchingTask(TaskBase):
     """특징점 매칭 및 Homography 산출 작업 (로그 기반)"""
 
-    def __init__(self, matcher_model_name: str = "FeatureMatcher_v1", min_matches: int = 4):
+    def __init__(
+        self, 
+        matcher_model_name: str = "FeatureMatcher_v1", 
+        min_matches: int = 4,
+        delay_seconds: float = None,
+        raise_exception: Exception = None
+    ):
         """
         Args:
             matcher_model_name: 특징점 매칭 모델 이름
             min_matches: Homography 산출 필요한 최소 특징점 수
+            delay_seconds: 작업 실행 시 지연 시간(초). None이면 지연 없음
+            raise_exception: 작업 실행 시 발생시킬 예외. None이면 정상 실행
         """
-        super().__init__("FeatureMatchingTask")
+        super().__init__("FeatureMatchingTask", delay_seconds, raise_exception)
         self.matcher_model_name = matcher_model_name
         self.min_matches = min_matches
 
@@ -23,8 +31,7 @@ class FeatureMatchingTask(TaskBase):
         """작업 실행 전 준비 작업"""
         try:
             # job_work_dir과 loop_context 가져오기
-            job_work_dir = context.get('job_work_dir')
-            loop_context = context.get('loop_context', {})
+            job_work_dir = context.get('job_dir')
 
             if not job_work_dir:
                 logger.error("❌ job_work_dir이 context에 없습니다")

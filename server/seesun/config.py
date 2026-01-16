@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # 스케줄링
     poll_interval_seconds: int = 30
-    dispatch_interval_minutes: int = 25
+    dispatch_interval_minutes: int = 1
 
     # AI 모델 엔드포인트 (HTTP 사용 시에만 필요, 내부 함수 호출이면 비워두기)
     ai_dispatch_url: Optional[str] = None

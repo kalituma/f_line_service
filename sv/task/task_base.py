@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 
 from sv.utils.logger import setup_logger
 
-logger = setup_logger(__name__)
+
 
 class TaskBase:
     """작업의 기본 클래스 (Template Method 패턴)"""
@@ -22,7 +22,7 @@ class TaskBase:
             raise_exception: 작업 실행 시 발생시킬 예외. None이면 정상 실행
         """
         self.task_name = task_name
-        self.logger = logging.getLogger(f"Task-{task_name}")
+        self.logger = setup_logger(f"Task-{task_name}")
         self.delay_seconds = delay_seconds
         self.raise_exception = raise_exception
         self.job_queue_service = None
@@ -94,12 +94,11 @@ class TaskBase:
             self.logger.error(f"Error updating task status: {str(e)}", exc_info=True)
             return False
 
-    def execute(self, context: Dict[str, Any], task_id: Optional[int] = None) -> Dict[str, Any]:
+    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """작업 실행의 전체 흐름을 관리 (Template Method)
 
         Args:
             context: 이전 작업들의 결과를 담은 컨텍스트
-            task_id: 작업 ID (DB 상태 업데이트용)
 
         Returns:
             작업 결과 딕셔너리
@@ -110,11 +109,7 @@ class TaskBase:
                 self.logger.info(f"⏳ Delaying task execution for {self.delay_seconds} seconds...")
                 time.sleep(self.delay_seconds)
                 self.logger.info(f"✓ Delay completed")
-            
-            # 0-1. Task 상태를 'processing'으로 업데이트
-            if task_id is not None:
-                self._update_task_status(task_id, 'processing')
-            
+
             # 1. 실행 전 hook
             self.before_execute(context)
             
@@ -128,19 +123,10 @@ class TaskBase:
             
             # 4. 실행 후 hook
             self.after_execute(context, result)
-            
-            # 4-1. Task 상태를 'completed'로 업데이트
-            if task_id is not None:
-                self._update_task_status(task_id, 'completed')
-            
+
             return result
             
         except Exception as e:
             # 5. 에러 발생 시 hook
             self.on_error(context, e)
-            
-            # 5-1. Task 상태를 'failed'로 업데이트
-            if task_id is not None:
-                self._update_task_status(task_id, 'failed')
-            
             raise

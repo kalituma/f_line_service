@@ -11,6 +11,7 @@ except ImportError:
 
 from sv.daemon.daemon_state import JobExecutionStatus
 from sv.daemon.module.split_executor import FlineTaskSplitExecutor
+from sv.daemon.module.fault_injector import FaultInjector
 from sv.backend.service.service_manager import get_service_manager
 from sv.backend.work_status import WorkStatus
 from sv.task.task_base import TaskBase
@@ -29,7 +30,7 @@ class ExecutionEngine:
         """
         self.num_executors = num_executors
         self.base_work_dir = base_work_dir
-        self.work_queue_service = get_service_manager().get_work_queue_service()
+        self._work_queue_service = None
 
         # base_work_dir이 없으면 생성
         try:
@@ -38,9 +39,17 @@ class ExecutionEngine:
         except Exception as e:
             logger.error(f"❌ Failed to create base work directory: {str(e)}", exc_info=True)
             raise
-        
+
+        fault_injector = FaultInjector()
+    
+    
+        # fault_injector.register_fault(
+        #     method_name="_on_secondary_tasks_start",
+        #     exception=FileNotFoundError("raised intentional file not found error"),
+        #     probability=1.0
+        # )
         self.executor_actors = [
-            FlineTaskSplitExecutor.remote(i, base_work_dir, update_url) for i in range(num_executors)
+            FlineTaskSplitExecutor.remote(i, base_work_dir, update_url, fault_injector) for i in range(num_executors)
         ]
         self.current_executor_idx = 0
         
@@ -50,6 +59,12 @@ class ExecutionEngine:
         self.lock = Lock()
         
         logger.info(f"✓ ExecutionEngine initialized with {num_executors} executors")
+
+    @property
+    def work_queue_service(self):
+        if self._work_queue_service is None:
+            self._work_queue_service = get_service_manager().get_work_queue_service()
+        return self._work_queue_service
 
     def _get_next_executor(self):
         """
@@ -64,7 +79,7 @@ class ExecutionEngine:
     
     # ==================== Work 상태 관리 메서드 ====================
     
-    def _update_work_status_safe(self, work_id: int, status: WorkStatus, log_prefix: str = "") -> bool:
+    def _update_work_status_safe(self, work_id: int, status: WorkStatus) -> bool:
         """
         Work 상태를 안전하게 업데이트 (에러 핸들링 포함)
         
@@ -78,13 +93,13 @@ class ExecutionEngine:
         """
         try:
             self.work_queue_service.update_work_status(work_id, status)
-            logger.info(f"{log_prefix}✓ Work {work_id} status updated to {status}")
+            logger.info(f"✓ Work {work_id} status updated to {status}")
             return True
         except Exception as e:
-            logger.error(f"{log_prefix}❌ Failed to update work {work_id} status to {status}: {str(e)}", exc_info=True)
+            logger.error(f"❌ Failed to update work {work_id} status to {status}: {str(e)}", exc_info=True)
             return False
     
-    def _on_execution_start(self, work_id: int) -> bool:
+    def _on_work_start(self, work_id: int) -> bool:
         """
         Work 시작 시 상태 업데이트
         
@@ -94,7 +109,7 @@ class ExecutionEngine:
         Returns:
             성공 여부
         """
-        return self._update_work_status_safe(work_id, WorkStatus.PROCESSING, "🚀 ")
+        return self._update_work_status_safe(work_id, WorkStatus.PROCESSING)
     
     def _on_execution_complete(self, work_id: int, result: Dict[str, Any]) -> None:
         """
@@ -105,8 +120,18 @@ class ExecutionEngine:
             result: Work 실행 결과
         """
         status = result.get('status', 'failed')
-        work_status = WorkStatus.COMPLETED if status == 'success' else WorkStatus.FAILED
-        self._update_work_status_safe(work_id, work_status, "🏁 ")
+        error_count = result.get('error_count', 0)
+        
+        # status가 'success'이고 error_count가 0일 때만 COMPLETED
+        # 하나라도 실패하면 FAILED로 처리
+        if status == 'success' and error_count == 0:
+            work_status = WorkStatus.COMPLETED
+            logger.info(f"Work {work_id} completed successfully (status={status}, errors={error_count})")
+        else:
+            work_status = WorkStatus.FAILED
+            logger.warning(f"Work {work_id} marked as FAILED (status={status}, errors={error_count})")
+            
+        self._update_work_status_safe(work_id, work_status)
     
     def execute_work(
         self,
@@ -114,7 +139,7 @@ class ExecutionEngine:
         primary_task: TaskBase,
         secondary_tasks: list,
         data_splitter,
-        on_work_complete: Optional[Callable[[int, Dict[str, Any]], None]] = None
+        on_job_complete: Optional[Callable[[int, Dict[str, Any]], None]] = None
     ) -> None:
         """
         Work 실행 (비동기 콜백 방식)
@@ -124,25 +149,27 @@ class ExecutionEngine:
             primary_task: Primary Task
             secondary_tasks: Secondary Tasks 리스트
             data_splitter: 데이터 분할 함수
-            on_work_complete: 완료 시 호출될 콜백 함수 (work_id, result)
+            on_job_complete: 완료 시 호출될 콜백 함수 (work_id, result)
         """
         work_id = work_info['work_id']
         
         # Work 시작 - 상태를 PROCESSING으로 업데이트
-        if not self._on_execution_start(work_id):
+        if not self._on_work_start(work_id):
             logger.error("❌ Failed to update work status to PROCESSING")
             return
 
         try:
             if not primary_task or not secondary_tasks:
                 logger.error("❌ Primary task or secondary tasks not registered")
+                self._update_work_status_safe(work_id, WorkStatus.FAILED)
+
                 error_result = {
                     **work_info,
                     'status': JobExecutionStatus.FAILED.to_str(),
                     'error': 'Tasks not registered'
                 }
-                if on_work_complete:
-                    on_work_complete(work_id, error_result)
+                if on_job_complete:
+                    on_job_complete(work_id, error_result)
                 return
             
             logger.info("=" * 80)
@@ -171,20 +198,21 @@ class ExecutionEngine:
             # ObjectRef와 콜백을 pending_works에 등록
             with self.lock:
                 self.pending_works[work_id] = result_ref
-                if on_work_complete:
-                    self.work_callbacks[work_id] = on_work_complete
+                if on_job_complete:
+                    self.work_callbacks[work_id] = on_job_complete
             
             logger.info(f"✓ Work {work_id} submitted successfully (monitoring by ThreadManager)")
             
         except Exception as e:
-            logger.error(f"❌ Error executing work {work_id}: {str(e)}", exc_info=True)
+            logger.error(f"❌ Error executing work {work_id}: {str(e)}", exc_info=True)            
+            self._update_work_status_safe(work_id, WorkStatus.FAILED)
             error_result = {
                 'work_id': work_id,
                 'status': JobExecutionStatus.FAILED.to_str(),
                 'error': str(e)
             }
-            if on_work_complete:
-                on_work_complete(work_id, error_result)
+            if on_job_complete:
+                on_job_complete(work_id, error_result)
     
     # ==================== 모니터링 인터페이스 (ThreadManager가 호출) ====================
     
@@ -228,16 +256,24 @@ class ExecutionEngine:
                 timeout=timeout
             )
             
+            # 역방향 매핑 생성 (ObjectRef -> work_id)
+            ref_to_work_id = {ref: wid for wid, ref in work_refs_map.items()}
+            
             # ready된 작업들 처리
             for ready_ref in ready_refs:
                 # ObjectRef에 해당하는 work_id 찾기
-                completed_work_id = None
-                for wid, ref in work_refs_map.items():
-                    if ref == ready_ref:
-                        completed_work_id = wid
-                        break
+                completed_work_id = ref_to_work_id.get(ready_ref)
                 
                 if completed_work_id is None:
+                    # 이론적으로 불가능하지만, Ray 내부 버그를 대비한 방어 코드
+                    logger.error(
+                        f"🐛 UNEXPECTED: Could not find work_id for completed ref: {ready_ref}. "
+                        f"This should never happen. Possible Ray bug."
+                    )
+                    try:
+                        ray.get(ready_ref, timeout=0)
+                    except Exception as cleanup_error:
+                        logger.debug(f"Error cleaning up orphaned ref: {cleanup_error}")
                     continue
                 
                 try:
@@ -248,33 +284,48 @@ class ExecutionEngine:
                     logger.info(f"✅ Work {completed_work_id} execution completed: {result.get('status')}")
                     logger.info("=" * 80)
 
-                    # Work 완료 - 상태를 COMPLETED/FAILED로 업데이트
+                    # Work 상태 업데이트 (콜백 실패와 무관하게 유지되어야 함)
                     self._on_execution_complete(completed_work_id, result)
-
-                    # 콜백 호출
+                    
+                    completed_works.append((completed_work_id, result))
+                    
+                    # 콜백 호출 (예외가 발생해도 Work 상태에 영향 없도록 별도 처리)
                     with self.lock:
                         callback = self.work_callbacks.get(completed_work_id)
                     
                     if callback:
-                        callback(completed_work_id, result)
-                    
-                    completed_works.append((completed_work_id, result))
+                        try:
+                            callback(completed_work_id, result)
+                        except Exception as callback_error:
+                            logger.error(
+                                f"⚠️ Callback error for work {completed_work_id} "
+                                f"(Work itself succeeded): {callback_error}",
+                                exc_info=True
+                            )
                     
                 except Exception as e:
                     logger.error(f"❌ Error processing work {completed_work_id}: {str(e)}", exc_info=True)
+                    self._update_work_status_safe(completed_work_id, WorkStatus.FAILED)
                     error_result = {
                         'work_id': completed_work_id,
                         'status': JobExecutionStatus.FAILED.to_str(),
                         'error': str(e)
                     }
                     
+                    completed_works.append((completed_work_id, error_result))
+                    
+                    # 콜백 호출 (안전하게 처리)
                     with self.lock:
                         callback = self.work_callbacks.get(completed_work_id)
                     
                     if callback:
-                        callback(completed_work_id, error_result)
-                    
-                    completed_works.append((completed_work_id, error_result))
+                        try:
+                            callback(completed_work_id, error_result)
+                        except Exception as callback_error:
+                            logger.error(
+                                f"⚠️ Callback error for work {completed_work_id}: {callback_error}",
+                                exc_info=True
+                            )
                 
                 finally:
                     # pending_works에서 제거
@@ -283,7 +334,34 @@ class ExecutionEngine:
                         self.work_callbacks.pop(completed_work_id, None)
             
         except Exception as e:
-            logger.error(f"Error checking completed works: {str(e)}", exc_info=True)
+            logger.error(f"💥 Critical error in ray.wait(): {str(e)}", exc_info=True)
+            # ray.wait() 자체가 실패한 경우, 모든 pending works를 FAILED로 처리
+            for work_id in list(work_refs_map.keys()):
+                logger.error(f"❌ Marking work {work_id} as FAILED due to ray.wait() error")
+                self._update_work_status_safe(work_id, WorkStatus.FAILED)
+                
+                error_result = {
+                    'work_id': work_id,
+                    'status': JobExecutionStatus.FAILED.to_str(),
+                    'error': f'Ray wait error: {str(e)}'
+                }
+                
+                # 콜백 호출
+                with self.lock:
+                    callback = self.work_callbacks.get(work_id)
+                
+                if callback:
+                    try:
+                        callback(work_id, error_result)
+                    except Exception as callback_error:
+                        logger.error(f"Error calling callback for work {work_id}: {callback_error}")
+                
+                completed_works.append((work_id, error_result))
+                
+                # pending_works에서 제거
+                with self.lock:
+                    self.pending_works.pop(work_id, None)
+                    self.work_callbacks.pop(work_id, None)
         
         return completed_works
     

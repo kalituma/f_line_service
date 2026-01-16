@@ -4,10 +4,8 @@ import sqlite3
 from sv.utils.logger import setup_logger
 from sv.backend.db.base_db import BaseDB
 from sv.backend.work_status import WorkStatus
-
+from sv.utils.date_parsing import _format_timestamps
 logger = setup_logger(__name__)
-
-# ==================== WorkQueue Class ====================
 
 class WorkQueue(BaseDB):
     """Work 큐 관리 클래스"""
@@ -25,11 +23,9 @@ class WorkQueue(BaseDB):
                 CREATE TABLE IF NOT EXISTS work_queue (
                     work_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     frfr_id TEXT NOT NULL,
-                    analysis_id TEXT NOT NULL,
-                    status TEXT DEFAULT 'pending',
-                    created_at REAL,
-                    updated_at REAL,
-                    UNIQUE(frfr_id, analysis_id)
+                    analysis_id TEXT NOT NULL,                    
+                    status TEXT DEFAULT 'pending',                    
+                    created_at REAL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_work_status ON work_queue(status, created_at);
@@ -101,7 +97,7 @@ class WorkQueue(BaseDB):
         try:
             with self._conn() as conn:
                 rows = conn.execute('SELECT * FROM work_queue ORDER BY created_at DESC').fetchall()
-                return [dict(row) for row in rows]
+                return [_format_timestamps(dict(row)) for row in rows]
         except Exception as e:
             logger.error(f"Error getting all works: {str(e)}")
             return []
@@ -114,7 +110,7 @@ class WorkQueue(BaseDB):
                     'SELECT * FROM work_queue WHERE work_id = ?',
                     (work_id,)
                 ).fetchone()
-                return dict(row) if row else None
+                return _format_timestamps(dict(row)) if row else None
         except Exception as e:
             logger.error(f"Error getting work by id: {str(e)}")
             return None
@@ -127,7 +123,7 @@ class WorkQueue(BaseDB):
                     'SELECT * FROM work_queue WHERE frfr_id = ? ORDER BY created_at ASC',
                     (frfr_id,)
                 ).fetchall()
-                return [dict(row) for row in rows]
+                return [_format_timestamps(dict(row)) for row in rows]
         except Exception as e:
             logger.error(f"Error getting works by frfr_id: {str(e)}")
             return []
@@ -140,7 +136,7 @@ class WorkQueue(BaseDB):
                     'SELECT * FROM work_queue WHERE analysis_id = ? ORDER BY created_at ASC',
                     (analysis_id,)
                 ).fetchall()
-                return [dict(row) for row in rows]
+                return [_format_timestamps(dict(row)) for row in rows]
         except Exception as e:
             logger.error(f"Error getting works by analysis_id: {str(e)}")
             return []
@@ -153,7 +149,7 @@ class WorkQueue(BaseDB):
                     'SELECT * FROM work_queue WHERE status = ? ORDER BY created_at ASC',
                     (status,)
                 ).fetchall()
-                return [dict(row) for row in rows]
+                return [_format_timestamps(dict(row)) for row in rows]
         except Exception as e:
             logger.error(f"Error getting works by status: {str(e)}")
             return []
@@ -181,7 +177,7 @@ class WorkQueue(BaseDB):
                     'SELECT * FROM work_queue WHERE work_id = ?',
                     (work_id,)
                 ).fetchone()
-                return dict(row) if row else None
+                return _format_timestamps(dict(row)) if row else None
         except Exception as e:
             logger.error(f"Error getting work status: {str(e)}")
             return None

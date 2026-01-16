@@ -163,7 +163,7 @@ class WorkQueueService:
         try:
             status_value = status.value if isinstance(status, WorkStatus) else status
             result = self.work_queue.get_works_by_status(status_value)
-            logger.info(f"Works retrieved with status={status_value}, count={len(result)}")
+            logger.debug(f"Works retrieved with status={status_value}, count={len(result)}")
             return result
         except Exception as e:
             logger.error(f"Error getting works by status: {str(e)}")

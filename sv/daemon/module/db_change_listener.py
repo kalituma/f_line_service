@@ -46,11 +46,17 @@ class DBChangeListener:
             poll_interval: 폴링 간격 (초)
         """        
         
-        self.work_queue_service = get_service_manager().get_work_queue_service()
+        self._work_queue_service = None
         self.poll_interval = poll_interval
         self.callbacks: List[Callable[[DBChangeEvent], None]] = []
         
         logger.info(f"DBChangeListener initialized with poll_interval={poll_interval}")
+    
+    @property
+    def work_queue_service(self):
+        if self._work_queue_service is None:
+            self._work_queue_service = get_service_manager().get_work_queue_service()
+        return self._work_queue_service
     
     def on_change(self, callback: Callable[[DBChangeEvent], None]):
         """
@@ -104,7 +110,7 @@ class DBChangeListener:
                 )
             else:
                 # pending 작업이 없음
-                logger.info(f"No pending work found in work_queue (status={status})")
+                logger.debug(f"No pending work found in work_queue (status={status})")
             
         except Exception as e:
             logger.error(

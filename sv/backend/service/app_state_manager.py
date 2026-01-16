@@ -1,6 +1,7 @@
 import asyncio
 from typing import Optional
 from enum import Enum
+from threading import Event as ThreadEvent
 
 from sv.utils.logger import setup_logger
 
@@ -20,14 +21,28 @@ class AppStateManager:
         self._state = AppState.INITIALIZING
         self._lock = asyncio.Lock()
         self._state_changed_event = asyncio.Event()
+        self._ready_event_thread = ThreadEvent()  # threading.Event for sync waiting
     
     async def wait_ready(self) -> None:
         """
-        애플리케이션이 READY 상태가 될 때까지 대기합니다.
+        애플리케이션이 READY 상태가 될 때까지 대기합니다. (비동기)
         """
         while self._state != AppState.READY:
             self._state_changed_event.clear()
             await self._state_changed_event.wait()
+    
+    def wait_until_ready(self, timeout: Optional[float] = 30) -> bool:
+        """
+        애플리케이션이 READY 상태가 될 때까지 대기합니다. (동기)
+        메인 스레드에서 서버가 준비될 때까지 블로킹 대기할 때 사용합니다.
+        
+        Args:
+            timeout: 최대 대기 시간 (초), None이면 무한 대기
+        
+        Returns:
+            bool: READY 상태가 되면 True, 타임아웃이면 False
+        """
+        return self._ready_event_thread.wait(timeout=timeout)
     
     async def set_state(self, state: AppState) -> None:
         """
@@ -42,6 +57,10 @@ class AppStateManager:
             self._state = state
             logger.info(f"App state changed: {old_state.value} → {state.value}")
             self._state_changed_event.set()
+            
+            # READY 상태가 되면 threading.Event도 설정
+            if state == AppState.READY:
+                self._ready_event_thread.set()
     
     def get_state(self) -> AppState:
         """

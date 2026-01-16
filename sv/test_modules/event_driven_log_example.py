@@ -3,32 +3,38 @@ try:
 except ImportError:
     ray = None  # type: ignore
 
-from typing import Optional, Callable, List, Dict, Any
+from typing import Optional, Dict, Any
 from threading import Thread, Event as ThreadEvent
+from datetime import datetime
 import time
 
+import os
+from sv import PROJECT_ROOT_PATH
 from sv.daemon.module.db_change_listener import DBChangeListener, DBChangeEvent, ChangeEventType
 from sv.daemon.module.execution_engine import ExecutionEngine
 from sv.daemon.module.work_manager import WorkManager
 from sv.daemon.module.task_manager import TaskManager
-from sv.utils.logger import setup_logger, setup_common_logger
+from sv.utils.logger import setup_logger
 from sv.backend.service.service_manager import get_service_manager
 from sv.daemon.module.update_handler import send_video_status_update
+from sv.daemon.module.http_request_client import post_request, HttpRequestError
 from sv.daemon.server_state import ServerAnalysisStatus
 from sv.daemon.daemon_state import STATUS_FAILED, STATUS_SUCCESS, STATUS_NOT_EXISTS
 
 from sv.test_modules.test_tasks import split_primary_task_result
-from sv.test_modules.test_tasks.connection_task import ConnectionTask
-from sv.test_modules.test_tasks.video_extract_task import VideoFrameExtractionTask
-from sv.test_modules.test_tasks.segmentation_task import VideoSegmentationTask
-from sv.test_modules.test_tasks.location_simulation_task import LocationSimulationTask
-from sv.test_modules.test_tasks.feature_matching_task import FeatureMatchingTask
-from sv.test_modules.test_tasks.geojson_boundary_task import SegmentationGeoJsonTask
+from sv.task.mock.connection_task import ConnectionTask
+from sv.task.mock.video_extract_task import VideoFrameExtractionTask
+from sv.task.mock.segmentation_task import VideoSegmentationTask
+from sv.task.mock.location_simulation_task import LocationSimulationTask
+from sv.task.mock.feature_matching_task import FeatureMatchingTask
+from sv.task.mock.geojson_boundary_task import SegmentationGeoJsonTask
 
 logger = setup_logger(__name__)
 
+
 def initialize_logger() -> None:
     setup_common_logger(None)
+
 
 service_manager = get_service_manager()
 if not service_manager.is_initialized():
@@ -45,16 +51,18 @@ class EventDrivenLogger:
     ):
         self.video_request_url = "http://127.0.0.1:8086/wildfire-data-sender/api/wildfire/sender"
         self.analysis_update_url = "http://127.0.0.1:8086/wildfire-data-receiver/api/wildfire/video-status"
-        self.work_dir = "C:/__workspace/f_line_service/data/workspace"
-        self.result_path = "C:/__workspace/f_line_service/data/vid/cy_all.geojson"
+        self.result_sent_url = "http://127.0.0.1:8086/wildfire-data-receiver/api/wildfire/data"
+        self.work_dir = os.path.join(PROJECT_ROOT_PATH, 'data', 'workspace')
+        self.result_path = os.path.join(PROJECT_ROOT_PATH, 'data', 'vid', 'cy_all.geojson')
 
         self.work_manager = WorkManager()
         self.task_manager = TaskManager()
 
         self.task_manager.register_primary_task(ConnectionTask(api_url=self.video_request_url))
         self.task_manager.register_secondary_tasks(
-            [VideoFrameExtractionTask(), VideoSegmentationTask(), LocationSimulationTask(), FeatureMatchingTask(),
-             SegmentationGeoJsonTask(result_path=self.result_path)])
+            [VideoFrameExtractionTask(delay_seconds=5), VideoSegmentationTask(delay_seconds=5),
+             LocationSimulationTask(delay_seconds=10), FeatureMatchingTask(delay_seconds=20),
+             SegmentationGeoJsonTask(result_path=self.result_path, delay_seconds=5)])
         self.task_manager.set_data_splitter(split_primary_task_result)
 
         self.execution_engine = ExecutionEngine(base_work_dir=self.work_dir, update_url=self.analysis_update_url,
@@ -118,6 +126,7 @@ class EventDrivenLogger:
             logger.error(f"Work {work_id} failed: {error_msg}")
         else:
             self._update_video_status(work_id, result)
+            self._send_analysis_results(work_id, result)
 
     def _update_video_status(self, work_id: str, result: Dict[str, Any]) -> None:
         """
@@ -130,12 +139,12 @@ class EventDrivenLogger:
         try:
             loop_context = result.get('loop_context')
             frfr_id = loop_context.get('frfr_id')
-            analysis_id = loop_context.get('analysis_id')            
+            analysis_id = loop_context.get('analysis_id')
 
             if not frfr_id or not analysis_id:
                 logger.error(f"❌ Missing frfr_id or analysis_id for work {work_id}")
                 return
-            
+
             video_updates = []
             videos_results = result.get('item_results')
             for video_result in videos_results:
@@ -171,6 +180,98 @@ class EventDrivenLogger:
         except Exception as e:
             logger.error(f"❌ Error updating work status for {work_id}: {str(e)}", exc_info=True)
 
+    def _send_analysis_results(self, work_id: str, result: Dict[str, Any]) -> None:
+        """
+        성공한 작업의 SegmentationGeoJsonTask 결과를 서버로 전송
+        
+        Args:
+            work_id: Work ID
+            result: Work의 결과 정보
+        """
+        try:
+            loop_context = result.get('loop_context')
+            frfr_id = loop_context.get('frfr_id')
+            analysis_id = loop_context.get('analysis_id')
+            
+            if not frfr_id or not analysis_id:
+                logger.error(f"❌ Missing frfr_id or analysis_id for work {work_id}")
+                return
+            
+            # item_results에서 성공한 항목만 처리
+            videos_results = result.get('item_results', [])
+            sent_count = 0
+            
+            for video_result in videos_results:
+                status = video_result.get('status')
+                
+                # status가 'success'인 경우만 처리
+                if status != STATUS_SUCCESS.to_str():
+                    continue
+                
+                # tasks에서 SegmentationGeoJsonTask 결과 찾기
+                tasks = video_result.get('tasks', [])
+                segmentation_task_result = None
+                
+                for task in tasks:
+                    if task.get('task_name') == 'SegmentationGeoJsonTask':                        
+                        segmentation_task_result = task.get('result')
+                        break
+                
+                if not segmentation_task_result:
+                    logger.warning("⚠️  No SegmentationGeoJsonTask result found for video")
+                    continue
+                
+                # integrated_convex_hull 가져오기
+                integrated_convex_hull = segmentation_task_result.get('integrated_convex_hull')
+                
+                if not integrated_convex_hull:
+                    logger.warning("⚠️  No integrated_convex_hull found in SegmentationGeoJsonTask result")
+                    continue
+                
+                # GeoJSON에 메타데이터 추가
+                enriched_geojson = integrated_convex_hull.copy()
+                
+                # frfr_id를 frfr_info_id로 추가
+                enriched_geojson['frfr_info_id'] = frfr_id
+                
+                # analysis_id 추가
+                enriched_geojson['analysis_id'] = analysis_id
+                
+                # 현재 시간을 yyyy-MM-dd HH:mm:ss 형태로 추가
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                enriched_geojson['timestamp'] = current_time
+                
+                # 서버로 POST 전송
+                try:
+                    logger.info(f"📤 Sending analysis result to {self.result_sent_url}...")
+                    logger.debug(f"   frfr_info_id: {frfr_id}")
+                    logger.debug(f"   analysis_id: {analysis_id}")
+                    logger.debug(f"   timestamp: {current_time}")
+                    
+                    response = post_request(
+                        url=self.result_sent_url,
+                        json_data=enriched_geojson,
+                        headers={'Content-Type': 'application/json'},
+                        timeout=30
+                    )
+                    
+                    logger.info("✅ Analysis result sent successfully")
+                    logger.debug(f"   Response: {response.text}")
+                    sent_count += 1
+                        
+                except HttpRequestError as e:
+                    logger.error(f"❌ HTTP request error sending analysis result: {str(e)}")
+                except Exception as e:
+                    logger.error(f"❌ Error sending analysis result: {str(e)}", exc_info=True)
+            
+            if sent_count > 0:
+                logger.info(f"✅ Sent {sent_count} analysis result(s) for work {work_id}")
+            else:
+                logger.info(f"ℹ️  No analysis results to send for work {work_id}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error in _send_analysis_results for {work_id}: {str(e)}", exc_info=True)
+
     def _process_pending_work(self) -> None:
         """
         대기 중인 Work 처리 (비동기 콜백 방식)
@@ -200,7 +301,7 @@ class EventDrivenLogger:
             primary_task=self.task_manager.primary_task,
             secondary_tasks=self.task_manager.secondary_tasks,
             data_splitter=self.task_manager.data_splitter,
-            on_work_complete=self._on_work_complete  # 콜백 함수
+            on_job_complete=self._on_work_complete  # 콜백 함수
         )
 
         logger.info(f"✓ Work {work_id} (frfr_id={frfr_id}) submitted")
@@ -348,8 +449,9 @@ if __name__ == "__main__":
     import logging
     from sv.utils.logger import setup_common_logger
 
+    # ray.init(num_cpus=8)
     ray.init(local_mode=True)
-    run_once_mode = True
+    run_once_mode = False
 
     # 로그 레벨 설정 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     log_level = logging.DEBUG  # DEBUG로 설정하면 모든 detail 메시지 출력

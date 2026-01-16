@@ -1,13 +1,14 @@
 from typing import Optional, List
 import sqlite3
+import time
+
 
 from sv.utils.logger import setup_logger
 from sv.backend.db.base_db import BaseDB
 from sv.backend.work_status import WorkStatus
+from sv.utils.date_parsing import _format_timestamps
 
 logger = setup_logger(__name__)
-
-# ==================== JobQueue Class ====================
 
 class JobQueue(BaseDB):
     """Job 큐 관리 클래스"""
@@ -29,9 +30,9 @@ class JobQueue(BaseDB):
                     analysis_id TEXT NOT NULL,
                     status TEXT DEFAULT 'pending',
                     video_url TEXT NOT NULL,
+                    workspace TEXT,
                     created_at REAL,
-                    updated_at REAL,
-                    UNIQUE(frfr_id, analysis_id),
+                    updated_at REAL,                    
                     FOREIGN KEY (work_id) REFERENCES work_queue(work_id)
                 );
 
@@ -41,7 +42,8 @@ class JobQueue(BaseDB):
 
         logger.info(f"Table '{table_name}' initialized successfully")
         
-    def add_job(self, work_id: int, frfr_id: str, analysis_id: str, video_url: str, status: WorkStatus = WorkStatus.PENDING) -> Optional[int]:
+    def add_job(self, work_id: int, frfr_id: str, analysis_id: str, video_url: str, 
+                workspace: Optional[str] = None, status: WorkStatus = WorkStatus.PENDING) -> Optional[int]:
         """
         작업을 큐에 추가합니다.
         중복된 frfr_id와 analysis_id 조합은 추가되지 않습니다.
@@ -51,12 +53,12 @@ class JobQueue(BaseDB):
             frfr_id: 산불 정보 ID
             analysis_id: 분석 ID
             video_url: 비디오 URL
+            workspace: 작업 디렉토리 경로 (선택사항)
             status: 초기 작업 상태 (기본값: PENDING)
             
         Returns:
             작업 ID 또는 None (중복된 경우 None 반환)
         """
-        import time
         now = time.time()
         
         # enum 값을 문자열로 변환
@@ -65,8 +67,8 @@ class JobQueue(BaseDB):
         with self._conn() as conn:
             try:
                 cursor = conn.execute(
-                    'INSERT INTO job_queue (work_id, frfr_id, analysis_id, video_url, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-                    (work_id, frfr_id, analysis_id, video_url, status_value, now)
+                    'INSERT INTO job_queue (work_id, frfr_id, analysis_id, video_url, workspace, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    (work_id, frfr_id, analysis_id, video_url, workspace, status_value, now)
                 )
                 logger.info(f"Job added: work_id={work_id}, frfr_id={frfr_id}, analysis_id={analysis_id}, status={status_value}")
                 return cursor.lastrowid
@@ -87,7 +89,6 @@ class JobQueue(BaseDB):
         Returns:
             {'job_id': int, 'work_id': int, 'frfr_id': str, 'analysis_id': str} 또는 None
         """
-        import time
         with self._conn() as conn:
             row = conn.execute(
                 'SELECT job_id, work_id, frfr_id, analysis_id FROM job_queue WHERE status = ? ORDER BY created_at ASC LIMIT 1',
@@ -104,44 +105,43 @@ class JobQueue(BaseDB):
         return None
     
     def get_all_jobs(self) -> List[dict]:
-        """모든 jobs 조회"""
+        """모든 jobs 조회 (타임스탬프 포맷됨)"""
         try:
             with self._conn() as conn:
                 rows = conn.execute('SELECT * FROM job_queue ORDER BY created_at DESC').fetchall()
-                return [dict(row) for row in rows]
+                return [_format_timestamps(dict(row)) for row in rows]
         except Exception as e:
             logger.error(f"Error getting all jobs: {str(e)}")
             return []
     
     def get_job_by_id(self, job_id: int) -> Optional[dict]:
-        """Job ID로 job 조회"""
+        """Job ID로 job 조회 (타임스탬프 포맷됨)"""
         try:
             with self._conn() as conn:
                 row = conn.execute(
                     'SELECT * FROM job_queue WHERE job_id = ?',
                     (job_id,)
                 ).fetchone()
-                return dict(row) if row else None
+                return _format_timestamps(dict(row)) if row else None
         except Exception as e:
             logger.error(f"Error getting job by id: {str(e)}")
             return None
     
     def get_jobs_by_status(self, status: str) -> List[dict]:
-        """상태별로 jobs 조회"""
+        """상태별로 jobs 조회 (타임스탬프 포맷됨)"""
         try:
             with self._conn() as conn:
                 rows = conn.execute(
                     'SELECT * FROM job_queue WHERE status = ? ORDER BY created_at ASC',
                     (status,)
                 ).fetchall()
-                return [dict(row) for row in rows]
+                return [_format_timestamps(dict(row)) for row in rows]
         except Exception as e:
             logger.error(f"Error getting jobs by status: {str(e)}")
             return []
     
     def update_job_status(self, job_id: int, status: str) -> bool:
         """Job 상태 업데이트"""
-        import time
         try:
             with self._conn() as conn:
                 conn.execute(
@@ -166,14 +166,14 @@ class JobQueue(BaseDB):
             return False
     
     def get_job_status(self, job_id: int) -> Optional[dict]:
-        """Job 상태 조회"""
+        """Job 상태 조회 (타임스탬프 포맷됨)"""
         try:
             with self._conn() as conn:
                 row = conn.execute(
                     'SELECT * FROM job_queue WHERE job_id = ?',
                     (job_id,)
                 ).fetchone()
-                return dict(row) if row else None
+                return _format_timestamps(dict(row)) if row else None
         except Exception as e:
             logger.error(f"Error getting job status: {str(e)}")
             return None

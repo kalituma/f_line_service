@@ -9,20 +9,26 @@ logger = setup_logger(__name__)
 class VideoFrameExtractionTask(TaskBase):
     """비디오 프레임 추출 작업 (로그 기반)"""
 
-    def __init__(self, frame_interval: int = 2):
+    def __init__(
+        self, 
+        frame_interval: int = 2,
+        delay_seconds: float = None,
+        raise_exception: Exception = None
+    ):
         """
         Args:
             frame_interval: 프레임 추출 간격 (초 단위)
+            delay_seconds: 작업 실행 시 지연 시간(초). None이면 지연 없음
+            raise_exception: 작업 실행 시 발생시킬 예외. None이면 정상 실행
         """
-        super().__init__("VideoFrameExtractionTask")
+        super().__init__("VideoFrameExtractionTask", delay_seconds, raise_exception)
         self.frame_interval = frame_interval
 
     def before_execute(self, context: Dict[str, Any]) -> None:
         """작업 실행 전 준비 작업"""
         try:
             # job_work_dir과 loop_context 가져오기
-            job_work_dir = context.get('job_work_dir')
-            loop_context = context.get('loop_context', {})
+            job_work_dir = context.get('job_dir')
 
             if not job_work_dir:
                 logger.error("❌ job_work_dir이 context에 없습니다")

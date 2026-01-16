@@ -9,7 +9,13 @@ class WorkManager:
     """Job 생명주기 관리"""
     
     def __init__(self):
-        self.work_queue_service = get_service_manager().get_work_queue_service()
+        self._work_queue_service = None
+    
+    @property
+    def work_queue_service(self):        
+        if self._work_queue_service is None:
+            self._work_queue_service = get_service_manager().get_work_queue_service()
+        return self._work_queue_service
     
     def add_work(self, frfr_id: str, analysis_id: str) -> Optional[int]:
         """

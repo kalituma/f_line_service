@@ -6,9 +6,26 @@ from sv.daemon.module.http_request_client import post_json, HttpRequestError
 logger = setup_logger(__name__)
 
 class ConnectionTask(TaskBase):
-    def __init__(self, api_url: str):
-        super().__init__("ConnectionTask")
+    def __init__(
+        self, 
+        api_url: str,
+        should_fail: bool = False,
+        fail_message: str = "의도적인 테스트 에러",
+        delay_seconds: float = None,
+        raise_exception: Exception = None
+    ):
+        """
+        Args:
+            api_url: API 엔드포인트 URL
+            should_fail: True이면 실행 시 에러 발생
+            fail_message: 에러 발생 시 사용할 메시지
+            delay_seconds: 작업 실행 시 지연 시간(초). None이면 지연 없음
+            raise_exception: 작업 실행 시 발생시킬 예외. None이면 정상 실행
+        """
+        super().__init__("ConnectionTask", delay_seconds, raise_exception)
         self.api_url = api_url
+        self.should_fail = should_fail
+        self.fail_message = fail_message
 
     def get_ids(self, context: Dict[str, Any]) -> Tuple[str, str]:
         loop_context = context.get('loop_context', {})
@@ -30,6 +47,11 @@ class ConnectionTask(TaskBase):
         """실제 작업 실행 - HTTP 요청으로 데이터 수집"""
         logger.info("▶️  ConnectionTask 실행 중...")
         frfr_id, analysis_id = self.get_ids(context)
+
+        # 🔥 테스트용: 의도적 에러 발생
+        if self.should_fail:
+            logger.error(f"❌ 의도적 에러 발생: {self.fail_message}")
+            raise RuntimeError(self.fail_message)
 
         # 요청 데이터 구성
         request_data = {
@@ -61,7 +83,7 @@ class ConnectionTask(TaskBase):
 
     def after_execute(self, context: Dict[str, Any], result: Dict[str, Any]) -> None:
         """작업 실행 후 정리 작업"""
-        logger.info(f"✅ ConnectionTask 완료 - 응답 데이터 수신 완료")
+        logger.info("✅ ConnectionTask 완료 - 응답 데이터 수신 완료")
         logger.info(f"📊 응답 데이터: {result}")
 
     def on_error(self, context: Dict[str, Any], error: Exception) -> None:
